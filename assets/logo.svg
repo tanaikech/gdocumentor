@@ -1,0 +1,33 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <linearGradient id="bgGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#0f172a"/>
+      <stop offset="50%" stop-color="#1e293b"/>
+      <stop offset="100%" stop-color="#0f172a"/>
+    </linearGradient>
+    <linearGradient id="docGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#3b82f6"/>
+      <stop offset="100%" stop-color="#1d4ed8"/>
+    </linearGradient>
+    <linearGradient id="sparkGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#34d399"/>
+      <stop offset="50%" stop-color="#38bdf8"/>
+      <stop offset="100%" stop-color="#a855f7"/>
+    </linearGradient>
+  </defs>
+  <!-- Rounded Square Background -->
+  <rect x="16" y="16" width="480" height="480" rx="108" fill="url(#bgGrad)" stroke="#334155" stroke-width="8"/>
+  <!-- Google Docs Stylized Sheet -->
+  <path d="M136 88 H304 L376 160 V408 C376 421.255 365.255 432 352 432 H136 C122.745 432 112 421.255 112 408 V112 C112 98.745 122.745 88 136 88 Z" fill="url(#docGrad)"/>
+  <path d="M304 88 V144 C304 152.837 311.163 160 320 160 H376 Z" fill="#93c5fd"/>
+  <!-- Document Lines & Green Suggested Edit Highlight -->
+  <rect x="152" y="192" width="140" height="16" rx="8" fill="#e2e8f0" opacity="0.85"/>
+  <rect x="152" y="232" width="184" height="20" rx="6" fill="#10b981"/>
+  <rect x="152" y="276" width="160" height="16" rx="8" fill="#e2e8f0" opacity="0.85"/>
+  <rect x="152" y="316" width="116" height="16" rx="8" fill="#e2e8f0" opacity="0.85"/>
+  <!-- Code Brackets Badge -->
+  <circle cx="364" cy="364" r="76" fill="#0f172a" stroke="url(#sparkGrad)" stroke-width="8"/>
+  <path d="M344 338 L320 364 L344 390 M384 338 L408 364 L384 390 M370 332 L358 396" fill="none" stroke="#38bdf8" stroke-width="10" stroke-linecap="round" stroke-linejoin="round"/>
+  <!-- Gemini AI Spark -->
+  <path d="M404 92 Q404 136 448 136 Q404 136 404 180 Q404 136 360 136 Q404 136 404 92 Z" fill="url(#sparkGrad)"/>
+</svg>

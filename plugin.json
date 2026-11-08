@@ -1,0 +1,35 @@
+{
+  "$schema": "https://antigravity.google/schemas/v1/plugin.json",
+  "name": "gdocumentor",
+  "displayName": "gdocumentor (DocuMentor AI)",
+  "version": "1.0.0",
+  "description": "Socratic AI writing & code review coach and 0-token Google Docs editor (Go CLI, Zero-GEMINI_API_KEY Host-AI MCP Server & 7-Client Skill Installer with WSL2<->Windows bridge). Proofreads local files, scoped GitHub/code ranges (--auto-deps), Web URLs, or Google Docs with bottom-up UTF-16 inline suggestions (WriteMode.SUGGEST), Socratic hints (--hint), multimodal figure/table checks, RAG rulebooks, AI+Human review learning summaries, and direct Markdown/table/image editing.",
+  "logo": "assets/logo.svg",
+  "suggestedPrompts": [
+    "Proofread a specific function or line range in a local script or GitHub repo into Google Docs (--auto-deps)",
+    "Review an existing Google Document in Socratic Hint-Only mode (-m hint) and show the Writing Coach & Learning Summary",
+    "Directly edit a Google Document: insert converted rich Markdown (headings, tables, lists, images) or insert/replace/delete images at any position"
+  ],
+  "author": {
+    "name": "Kanshi Tanaike",
+    "url": "https://github.com/tanaikech"
+  },
+  "homepage": "https://github.com/tanaikech/gdocumentor",
+  "repository": "https://github.com/tanaikech/gdocumentor",
+  "license": "MIT",
+  "keywords": [
+    "google-docs",
+    "google-drive",
+    "gemini",
+    "mcp-server",
+    "model-context-protocol",
+    "proofreading",
+    "code-review",
+    "writing-coach",
+    "socratic-coaching",
+    "rag",
+    "wsl2",
+    "antigravity-plugin"
+  ],
+  "skills": "skills"
+}

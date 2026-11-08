@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "server": {
+      "command": "bash",
+      "args": [
+        "${PLUGIN_ROOT}/skills/documentor-ai/scripts/run_documentor.sh",
+        "mcp"
+      ]
+    }
+  }
+}
