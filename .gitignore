@@ -1,6 +1,7 @@
 # Ignored temporary and local translation directories
 temp/
 bin/
+checkpoints/
 
 # Compiled binaries
 /gdocumentor

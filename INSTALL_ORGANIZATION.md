@@ -13,7 +13,7 @@ At the same time, organizations face three practical requirements when adopting 
 2. **Strict Privacy & File Ownership Between Students:** Student A (`student01@school.edu`) must only be able to access Student A's own files and Google Documents—never Student B's (`student02@school.edu`) or the instructor's private files.
 3. **1-to-N Classroom & Lab Scaling:** Educators and team leads need a way to enforce shared rubrics, coding standards, or AI Coach Personas (`RAG_FOLDER_ID` / `-r`) and optionally deliver Socratic hints (`--hint`) and **`🎓 DocuMentor AI Summary`** tabs (`--summary-tab`) across dozens of student Google Docs in a single batch.
 
-**`gdocumentor` (`v1.0.0`)** natively supports all three requirements **without modifying a single line of application code**, using its built-in separation between:
+**`gdocumentor` (`v1.0.1`)** natively supports all three requirements **without modifying a single line of application code**, using its built-in separation between:
 - **Administrator-Managed Shared Settings**: `GEMINI_API_KEY` (for standalone CLI execution), `GOOGLE_CLOUD_QUOTA_PROJECT` (`X-Goog-User-Project`), and `RAG_FOLDER_ID` (shared rubrics & AI Coach Persona).
 - **Host-AI MCP Execution (`gdocumentor mcp`)**: When students or engineers invoke `gdocumentor` as an MCP server from an AI agent (such as **Google Antigravity `agy`**, Claude Desktop, Cursor, or Windsurf), `gdocumentor` uses the **client-side AI agent's own LLM (Host AI)** (`model: "agent-ai"`)—requiring **zero `GEMINI_API_KEY` inside `gdocumentor`** and working with any LLM provider configured in the agent.
 - **User-Isolated Document Access**: Local workspace isolation (`--no-auth`), individual student OAuth2 tokens (`student01@school.edu`), or instructor-side batch execution.
@@ -73,6 +73,7 @@ Ideal for computer science classes, writing workshops using Markdown or Word (`.
    ```bash
    # /etc/profile.d/gdocumentor.sh (Loaded automatically for all OS users)
    export GEMINI_API_KEY="AIzaSy...(Organization-Gemini-API-Key)"
+   # Default: "gemini-3.8-flash" (or "gemini-4-hydrogen", "gemini-4-carbon", "gemini-4-argon")
    export DOCUMENTOR_MODEL="gemini-3.8-flash"
    ```
 4. *(Optional)* Place your course rubric and custom AI Coach Persona in a read-only shared directory (e.g., `/etc/gdocumentor/rules/course_rubric.md`):

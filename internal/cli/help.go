@@ -55,7 +55,7 @@ func PrintSubcommandHelp(w io.Writer, topic string) {
 
 // PrintHelp writes the comprehensive English CLI usage guide to w.
 func PrintHelp(w io.Writer) {
-	helpText := `gdocumentor — DocuMentor AI (Go CLI, Dual-Engine MCP Server & Multi-Agent Skill v1.0.0)
+	helpText := "gdocumentor — DocuMentor AI (Go CLI, Dual-Engine MCP Server & Multi-Agent Skill v" + Version + `)` + `
 Transform AI from a "Ghostwriter" into a "Writing & Code Review Coach" on Google Docs and Local Files.
 
 USAGE:
@@ -113,7 +113,7 @@ COACHING & AI MODEL FLAGS:
   -m, --mode <suggest|hint>   "suggest" (WriteMode.SUGGEST + educational reply) or "hint" (Socratic coaching comments)
       --include-resolved      Include resolved/accepted/rejected review threads as coaching context (default: true)
       --no-include-resolved   Exclude resolved review threads from AI context
-      --model <name>          Gemini model: "gemini-3.8-flash" (default), "gemini-4-argon" (deep), or any model ID
+      --model <name>          Gemini model: "gemini-3.8-flash" (default), "gemini-4-hydrogen", "gemini-4-carbon", "gemini-4-argon", or any model ID
   -l, --lang <code>           Coaching feedback & comment language: "en" (default), "ja", "de", "fr", "es", "zh", "ko", "auto", etc.
   -p, --prompt <text>         Custom focus instructions for proofreading or topic outline for draft generation
 
@@ -171,6 +171,7 @@ AUTHENTICATION, LOCAL FILE OUTPUT, MCP SERVER & AGENT SKILL FLAGS:
       --ai-summary-result <j> Apply pre-generated SummaryResult JSON from an external AI agent without calling Gemini API
       --generated-draft <txt> Insert pre-generated initial draft text (or @file) without calling Gemini API
       --api-key <key>         Gemini API key (overrides GEMINI_API_KEY environment variable)
+      --gemini-base-url <url> Optional custom Gemini API endpoint / reverse proxy URL (overrides GEMINI_BASE_URL)
       --access-token <token>  Google OAuth2 access token (overrides ADC / gcloud)
       --quota-project <id>    Google Cloud Quota Project ID for X-Goog-User-Project header
       --input-json <json|@f>  Pass all options as a structured JSON string or @file.json
@@ -397,7 +398,7 @@ KEY FLAGS:
       --hint                    Shorthand for -m hint (Socratic Hint-Only coaching mode)
   -l, --lang <code>             Feedback & comment language: "en" (default), "ja", "de", "fr", "es", "zh", "ko", "auto", etc.
   -p, --prompt <text>           Custom focus instructions for proofreading
-      --model <name>            Gemini model when running as standalone CLI (default: "gemini-3.8-flash", or "gemini-4-argon")
+      --model <name>            Gemini model in standalone CLI mode (default: "gemini-3.8-flash"; also "gemini-4-hydrogen", "gemini-4-carbon", "gemini-4-argon")
       --no-auth, --local        Run WITHOUT Google OAuth2 (outputs inline diff/hint report to a local Markdown file)
   -o, --output <file-path>      Write local Markdown report (works in BOTH --no-auth mode AND Google Docs mode)
       --save-local              Also save local Markdown report (<stem>_proofread.md / <stem>_hint.md) alongside Google Docs
@@ -450,7 +451,7 @@ FLAGS:
   -p, --prompt <text>           Custom focus instructions for the summary analysis
   -o, --output <file-path>      Save the generated Learning Summary report to a local Markdown file
       --save-local              Save the generated Learning Summary to <docId>_summary.md
-      --model <name>            Gemini model when running as standalone CLI (default: "gemini-3.8-flash")
+      --model <name>            Gemini model in standalone CLI mode (default: "gemini-3.8-flash"; also "gemini-4-hydrogen", "gemini-4-carbon", "gemini-4-argon")
       --json                    Output pure JSON to stdout
 
 EXAMPLES:
@@ -489,7 +490,7 @@ FLAGS:
       --drive-rag <id|url>      Google Drive Folder/File ID or URL containing organization templates/rulebooks
       --persona <text>          Custom AI writer/coach persona
   -l, --lang <code>             Draft language: "en" (default), "ja", "de", "fr", "es", "zh", "ko", "auto", etc.
-      --model <name>            Gemini model when running as standalone CLI (default: "gemini-3.8-flash")
+      --model <name>            Gemini model in standalone CLI mode (default: "gemini-3.8-flash"; also "gemini-4-hydrogen", "gemini-4-carbon", "gemini-4-argon")
       --no-auth, --local        Generate draft without Google OAuth2 and save directly to a local file
   -o, --output <file-path>      Save the generated draft to a local file (works in BOTH --no-auth and Google Docs modes)
       --save-local              Also save the generated draft to gdocumentor_draft.md alongside Google Docs

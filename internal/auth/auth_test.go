@@ -52,6 +52,17 @@ func TestResolveModelAndAPIKey(t *testing.T) {
 	if mod2 := m2.ResolveModel(); mod2 != "gemini-custom-experimental-99" {
 		t.Fatalf("expected custom model passed transparently, got %q", mod2)
 	}
+
+	for alias, want := range map[string]string{
+		"hydrogen":          "gemini-4-hydrogen",
+		"carbon":            "gemini-4-carbon",
+		"models/gemini-4-carbon": "gemini-4-carbon",
+	} {
+		mAlias := NewManager(Options{Model: alias})
+		if got := mAlias.ResolveModel(); got != want {
+			t.Fatalf("ResolveModel(%q): expected %q, got %q", alias, want, got)
+		}
+	}
 }
 
 func TestGetAccessTokenPriorityAndFallback(t *testing.T) {

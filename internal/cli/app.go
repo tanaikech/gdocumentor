@@ -21,7 +21,7 @@ import (
 )
 
 // Version is the semantic version of the DocuMentor AI Go CLI & Agent Skill.
-const Version = "1.0.0"
+var Version = "1.0.1"
 
 // Options holds all parsed CLI flags, subcommand settings, and Agent Skill JSON input parameters.
 type Options struct {
@@ -44,7 +44,7 @@ type Options struct {
 	SummaryTabName  string   `json:"summaryTabName"`  // --summary-tab-name / --summary-tag-name: custom title for the Google Docs Summary Tab
 	Mode            string   `json:"mode"`            // -m / --mode: "suggest" (default) or "hint"
 	IncludeResolved bool     `json:"includeResolved"` // --include-resolved (default true) / --no-include-resolved
-	Model           string   `json:"model"`           // --model: "gemini-3.8-flash" (default), "gemini-4-argon", or custom
+	Model           string   `json:"model"`           // --model: "gemini-3.8-flash" (default), "gemini-4-hydrogen", "gemini-4-carbon", "gemini-4-argon", or custom
 	Lang            string   `json:"lang"`            // -l / --lang: "en" (default) or "ja"
 	Prompt          string   `json:"prompt"`          // -p / --prompt custom instructions or draft topic
 	APIKey          string   `json:"apiKey"`          // --api-key Gemini API key override
@@ -119,10 +119,10 @@ type Options struct {
 	HelpTopic   string `json:"-"`
 	ShowVersion bool   `json:"-"`
 
-	// Test hooks and working directory configuration
+	// Test hooks, reverse-proxy override, and working directory configuration
 	DocsBaseURL   string `json:"-"`
 	DriveBaseURL  string `json:"-"`
-	GeminiBaseURL string `json:"-"`
+	GeminiBaseURL string `json:"geminiBaseUrl,omitempty"` // --gemini-base-url: optional custom Gemini API endpoint / reverse proxy URL
 	WorkDir       string `json:"workDir,omitempty"` // -w / --work-dir: working directory for resolving relative input, rule, and output paths
 	StdinContent  string `json:"stdinContent,omitempty"`
 }
@@ -381,6 +381,12 @@ func ParseArgs(args []string) (*Options, error) {
 				return nil, err
 			}
 			opts.APIKey = v
+		case "--gemini-base-url":
+			v, err := nextVal()
+			if err != nil {
+				return nil, err
+			}
+			opts.GeminiBaseURL = strings.TrimSpace(v)
 		case "--quota-project":
 			v, err := nextVal()
 			if err != nil {

@@ -231,6 +231,14 @@ func (c *Client) GenerateProofreading(ctx context.Context, opts ProofreadPromptO
 	parts = append(parts, contextParts...)
 	parts = append(parts, map[string]any{"text": promptText})
 
+	genCfg := map[string]any{
+		"responseMimeType": "application/json",
+		"responseSchema":   buildProofreadResponseSchema(lang),
+	}
+	if SupportsTemperature(c.model) {
+		genCfg["temperature"] = 0.25
+	}
+
 	payload := map[string]any{
 		"contents": []map[string]any{
 			{
@@ -238,20 +246,19 @@ func (c *Client) GenerateProofreading(ctx context.Context, opts ProofreadPromptO
 				"parts": parts,
 			},
 		},
-		"generationConfig": map[string]any{
-			"temperature":      0.25,
-			"responseMimeType": "application/json",
-			"responseSchema":   buildProofreadResponseSchema(lang),
-		},
+		"generationConfig": genCfg,
 	}
 
-	rawJSON, err := c.callGenerateContent(ctx, payload)
+	rawJSON, finishReason, err := c.callGenerateContentWithFinishReason(ctx, payload)
 	if err != nil {
 		return nil, err
 	}
 
 	var result ProofreadResult
 	if err := json.Unmarshal([]byte(rawJSON), &result); err != nil {
+		if finishReason == "MAX_TOKENS" {
+			return nil, fmt.Errorf("Gemini ProofreadResult JSON was truncated at finishReason=MAX_TOKENS [model=%s]; try scoping a smaller range (-t / --range): %w", c.model, err)
+		}
 		return nil, fmt.Errorf("failed to parse Gemini ProofreadResult JSON: %w (raw: %s)", err, rawJSON)
 	}
 	return &result, nil
@@ -310,6 +317,14 @@ func (c *Client) GenerateLearningSummaryFromExisting(ctx context.Context, opts S
 	parts = append(parts, contextParts...)
 	parts = append(parts, map[string]any{"text": promptText})
 
+	genCfg := map[string]any{
+		"responseMimeType": "application/json",
+		"responseSchema":   buildSummaryResponseSchema(lang),
+	}
+	if SupportsTemperature(c.model) {
+		genCfg["temperature"] = 0.25
+	}
+
 	payload := map[string]any{
 		"contents": []map[string]any{
 			{
@@ -317,20 +332,19 @@ func (c *Client) GenerateLearningSummaryFromExisting(ctx context.Context, opts S
 				"parts": parts,
 			},
 		},
-		"generationConfig": map[string]any{
-			"temperature":      0.25,
-			"responseMimeType": "application/json",
-			"responseSchema":   buildSummaryResponseSchema(lang),
-		},
+		"generationConfig": genCfg,
 	}
 
-	rawJSON, err := c.callGenerateContent(ctx, payload)
+	rawJSON, finishReason, err := c.callGenerateContentWithFinishReason(ctx, payload)
 	if err != nil {
 		return nil, err
 	}
 
 	var result SummaryResult
 	if err := json.Unmarshal([]byte(rawJSON), &result); err != nil {
+		if finishReason == "MAX_TOKENS" {
+			return nil, fmt.Errorf("Gemini SummaryResult JSON was truncated at finishReason=MAX_TOKENS [model=%s]; try scoping a smaller range (--range): %w", c.model, err)
+		}
 		return nil, fmt.Errorf("failed to parse Gemini SummaryResult JSON: %w (raw: %s)", err, rawJSON)
 	}
 	return &result, nil
@@ -409,15 +423,18 @@ The Google Document is currently blank. Based on the user's instructions/notes b
 				"parts": parts,
 			},
 		},
-		"generationConfig": map[string]any{
+	}
+	if SupportsTemperature(c.model) {
+		payload["generationConfig"] = map[string]any{
 			"temperature": 0.5,
-		},
+		}
 	}
 
-	rawDraft, err := c.callGenerateContent(ctx, payload)
+	rawDraft, finishReason, err := c.callGenerateContentWithFinishReason(ctx, payload)
 	if err != nil {
 		return "", err
 	}
+	_ = finishReason
 	cleaned := reLeadingCodeFence.ReplaceAllString(rawDraft, "")
 	cleaned = reTrailingCodeFence.ReplaceAllString(cleaned, "")
 	return strings.TrimSpace(cleaned), nil

@@ -10,7 +10,7 @@ description: Proofread and review local manuscripts, multi-file source code, spe
 Instead of silently overwriting a user's manuscript or code, DocuMentor AI:
 1. Natively converts single-file **Markdown (`.md`, `.markdown`, automatically embedding local/remote images as Base64 Data URIs with a Drive `thumbnailLink` `=s2048` fallback), Text (`.txt`), PDF (`.pdf`), and DOCX (`.docx`)** documents into Google Docs (`application/vnd.google-apps.document`), inserts source code / script files (`.go`, `.js`, `.ts`, `.py`, `.gs`, `.sh`, etc.) directly as plain text into a newly created Google Document, or reads an existing Google Document tab (`-d`, including pending suggestions, open comments, resolved review history, tables, and embedded `contentUri` / `sourceUri` figures/charts).
 2. Automatically resolves local dependency files (`--auto-deps` for Go, JS/TS, Python, C/C++, Rust, Markdown links, or adjacent numbered chapters), organization RAG rulebooks (`--rules`, `--rules-dir`, `--drive-rag`), and custom **AI Persona / Positioning** (`# AIの位置づけ` / `# AI Persona` inside RAG rulebooks or via `--persona` / `--role`) in parallel.
-3. Calls **Gemini** (`gemini-3.8-flash` by default, or `gemini-4-argon` for deep multi-file reasoning) with hybrid context optimization (zero-latency inline XML tags for text files; parallel Gemini File API resumable upload with guaranteed `defer` deletion for PDFs and embedded images).
+3. Calls **Gemini** (`gemini-3.8-flash` by default, or `gemini-4-hydrogen`, `gemini-4-carbon`, and `gemini-4-argon` for fast agentic coaching and frontier deep multi-file reasoning) with hybrid context optimization (zero-latency inline XML tags for text files; parallel Gemini File API resumable upload with guaranteed `defer` deletion for PDFs and embedded images).
 4. Maps every suggestion to exact **UTF-16 code unit coordinates** (including surrogate pairs for emojis/CJK) and applies them in **bottom-to-top (`StartIndex` descending)** order so earlier indices never shift.
 5. Attaches an educational **Reason for Revision (`💡`)** and **Learning Point (`🎓`)** to every inline suggestion card, and returns a structured **Writing Coach & Learning Summary** plus the clickable **Google Docs URL**.
 
@@ -78,6 +78,7 @@ Activate `documentor-ai` when the user asks to:
 | `-p <prompt>` / `--prompt` | `"prompt": "<prompt>"` |
 | `-o <file>` / `--output <file>` | `"outputPath": "<file>"` |
 | `--save-local` | `"saveLocal": true` |
+| `--model <name>` | `"model": "<name>"` (with `"useInternalGemini": true` if using internal Gemini API) |
 
 ### Available MCP Tools (`ServerName: "gdocumentor_server"`)
 - **`gdocumentor_proofread`**: Proofread local files/directories (`.md`, `.txt`, `.pdf`, `.docx`, or source code scripts), line/character ranges (`targets`, `range`), GitHub repos (`repoUrl`), Web URLs, or existing Google Docs (`docId`) with RAG (`rules`, `rulesDir`, `driveRag`) and custom AI Persona (`persona`). Supports both Google Docs mode and Access-Token-Free Local Mode (`noAuth: true` + `outputPath`).

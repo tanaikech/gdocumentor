@@ -474,7 +474,15 @@ func mcpToolDefinitions() []map[string]any {
 					},
 					"model": map[string]any{
 						"type":        "string",
-						"description": "Optional model label (defaults to 'agent-ai' in MCP Host-AI mode).",
+						"description": "Optional model label (defaults to 'agent-ai' in MCP Host-AI mode; when useInternalGemini is true, accepts 'gemini-3.8-flash', 'gemini-4-hydrogen', 'gemini-4-carbon', 'gemini-4-argon', or any Gemini model ID).",
+					},
+					"useInternalGemini": map[string]any{
+						"type":        "boolean",
+						"description": "Set to true to force gdocumentor to call the internal Gemini API (using GEMINI_API_KEY) instead of Host-AI mode.",
+					},
+					"geminiBaseUrl": map[string]any{
+						"type":        "string",
+						"description": "Optional custom Gemini API base URL or reverse proxy URL when useInternalGemini is true.",
 					},
 					"lang": map[string]any{
 						"type":        "string",
@@ -613,7 +621,15 @@ func mcpToolDefinitions() []map[string]any {
 					},
 					"model": map[string]any{
 						"type":        "string",
-						"description": "Optional model label (defaults to 'agent-ai' in MCP Host-AI mode).",
+						"description": "Optional model label (defaults to 'agent-ai' in MCP Host-AI mode; when useInternalGemini is true, accepts 'gemini-3.8-flash', 'gemini-4-hydrogen', 'gemini-4-carbon', 'gemini-4-argon', or any Gemini model ID).",
+					},
+					"useInternalGemini": map[string]any{
+						"type":        "boolean",
+						"description": "Set to true to force gdocumentor to call the internal Gemini API (using GEMINI_API_KEY) instead of Host-AI mode.",
+					},
+					"geminiBaseUrl": map[string]any{
+						"type":        "string",
+						"description": "Optional custom Gemini API base URL or reverse proxy URL when useInternalGemini is true.",
 					},
 					"lang": map[string]any{
 						"type":        "string",
@@ -725,7 +741,15 @@ func mcpToolDefinitions() []map[string]any {
 					},
 					"model": map[string]any{
 						"type":        "string",
-						"description": "Optional model label (defaults to 'agent-ai' in MCP Host-AI mode).",
+						"description": "Optional model label (defaults to 'agent-ai' in MCP Host-AI mode; when useInternalGemini is true, accepts 'gemini-3.8-flash', 'gemini-4-hydrogen', 'gemini-4-carbon', 'gemini-4-argon', or any Gemini model ID).",
+					},
+					"useInternalGemini": map[string]any{
+						"type":        "boolean",
+						"description": "Set to true to force gdocumentor to call the internal Gemini API (using GEMINI_API_KEY) instead of Host-AI mode.",
+					},
+					"geminiBaseUrl": map[string]any{
+						"type":        "string",
+						"description": "Optional custom Gemini API base URL or reverse proxy URL when useInternalGemini is true.",
 					},
 					"lang": map[string]any{
 						"type":        "string",

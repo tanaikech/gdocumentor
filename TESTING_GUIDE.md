@@ -16,7 +16,7 @@ Every test scenario below is **100% self-contained**: it includes ready-to-copy 
 
 | Test # | Feature Under Test | Required Credentials (`GEMINI_API_KEY` / Google OAuth2 Access Token) | Key Capabilities Verified | Est. Time |
 | :--- | :--- | :--- | :--- | :--- |
-| **[Test 1](#test-1--environment-native-adc-auth-bilingual-output--model-switching)** | Environment, Native ADC Auth, Bilingual Output (`-l en`/`ja`) & Model Switching | **`GEMINI_API_KEY`: Required**<br/>**Access Token: Required** (Steps 3–4) / **Not Required** (Step 5 `--no-auth`) | Native in-process OAuth2/ADC, Quota Project resolution, `--model gemini-3.8-flash` vs. `gemini-4-argon`, Pageless mode, and automated unit/integration test suite | 1 min |
+| **[Test 1](#test-1--environment-native-adc-auth-bilingual-output--model-switching)** | Environment, Native ADC Auth, Bilingual Output (`-l en`/`ja`) & Model Switching | **`GEMINI_API_KEY`: Required**<br/>**Access Token: Required** (Steps 3–4) / **Not Required** (Step 5 `--no-auth`) | Native in-process OAuth2/ADC, Quota Project resolution, `--model gemini-3.8-flash` vs. `gemini-4-hydrogen` / `gemini-4-carbon` / `gemini-4-argon`, Pageless mode, and automated unit/integration test suite | 1 min |
 | **[Test 2](#test-2--initial-draft-generation--blank-document-auto-detection)** | `draft` Subcommand & Blank Google Document Auto-Detection | **`GEMINI_API_KEY`: Required**<br/>**Access Token: Required** | Generating clean plain-text drafts from a prompt (`WriteMode.EDIT`) into a new Pageless or existing blank Google Document | 1 min |
 | **[Test 3](#test-3--full-document-multimodal-proofreading-prose--table--figure)** | Full-Document Multimodal Proofreading (`sample/sample_article.md` + `sample/sample_figure.png`) | **`GEMINI_API_KEY`: Required**<br/>**Access Token: Required** | Native Markdown-to-Pageless-Google-Docs conversion with Base64 image embedding (and Drive `thumbnailLink` `=s2048` fallback), inline `WriteMode.SUGGEST`, `TABLE_1` & `VISUAL_1` multimodal review comments, and existing Google Doc (`-d`) `contentUri` image analysis | 2 min |
 | **[Test 4](#test-4--active-self-revision-coaching-socratic-hint-only-mode)** | `💡 Hint-Only Mode` (`--mode hint` / `--hint`) | **`GEMINI_API_KEY`: Required**<br/>**Access Token: Required** | Anchored coaching hint comments (`insertComment`) with **🎯 Flagged Phrase**, **💡 Issue**, and **🎓 Coaching Hint**—without spoiling the rewrite | 2 min |
@@ -28,7 +28,7 @@ Every test scenario below is **100% self-contained**: it includes ready-to-copy 
 | **[Test 10](#test-10--antigravity-plugin--global-mcp-server-gdocumentor-mcp--strict---json--input-json-stream-separation)** | **Antigravity Plugin, Global MCP Server (`gdocumentor mcp`) & Strict `--json` Mode** | **`GEMINI_API_KEY`: Required** (for `run_documentor.sh` CLI wrapper) / **Not Required** (for `gdocumentor mcp`)<br/>**Access Token: Required** | Verifying `agy plugin validate --strict .` (`mcpServers 1`), JSON-RPC 2.0 MCP Server tools (`initialize`, `tools/list`, `tools/call`), `run_documentor.sh`, and zero ANSI/spinner contamination on `stdout` | 2 min |
 | **[Test 11](#test-11--access-token-free-local-mode---no-auth-mcp-noauth-true--dual-output--o--save-local-with-access-token)** | **Access-Token-Free Mode (`--no-auth` / MCP `noAuth: true`) & Dual Local Output (`-o <file>` / `--save-local` with Access Token)** | **`GEMINI_API_KEY`: Required** (CLI) / **Not Required** (MCP)<br/>**Access Token: Not Required** (Steps 1–2 `--no-auth`) / **Required** (Step 3 Dual Output) | Verifying local Markdown report generation without an Access Token (CLI & MCP) AND simultaneous Pageless Google Doc + local Markdown file output when using an Access Token | 2 min |
 | **[Test 12](#test-12--direct-google-docs-editing-edit-subcommand-create-delete-plainmarkdown-insert-via-file--pipe--here-string--heredoc--redirect-image-insertreplacedelete-replace--delete-ranges--0-gemini-tokens)** | **Direct Google Docs Editing (`edit` Subcommand: Create, Delete, Plain/Markdown Insert, Image Insert/Replace/Delete, Replace & Delete Ranges — 0 Gemini Tokens)** | **`GEMINI_API_KEY`: Not Required** (`0` tokens)<br/>**Access Token: Required** | `--create-doc`, `--delete-doc`, `--markdown` (headings, bold/italic/code/links, lists, tables, images), `--insert-image`/`--replace-image`/`--delete-image`, `--prepend`/`--append`/`--at`/`--before`/`--after`/`--before-paragraph`/`--after-paragraph`, pipe `\|`, `<<<`, `<<EOF`, `<`, `--find`/`--replace`, `--delete-range`/`--delete-text`/`--clear` | 2 min |
-| **[Test 13](#test-13--dual-ai-execution-architecture-mcp-host-ai-engine-vs-internal-gemini-api-fallback--agy--p-non-interactive-verification)** | **Dual AI Execution Architecture (MCP Host-AI Engine vs. Internal Gemini API Fallback & `agy -p` Verification)** | **`GEMINI_API_KEY`: Not Required** (MCP Host-AI default)<br/>**Access Token: Not Required** (`noAuth: true`) | Zero-`GEMINI_API_KEY` MCP 1-Step Fast Path & 2-Step Prepare/Apply, `useInternalGemini: true` / `GDOCUMENTOR_MCP_DEFAULT_ENGINE=gemini` rollback, and non-interactive `agy -p --dangerously-skip-permissions` E2E verification | 2 min |
+| **[Test 13](#test-13--dual-ai-execution-architecture-mcp-host-ai-engine-vs-internal-gemini-api-fallback--agy--p-non-interactive-verification)** | **Dual AI Execution Architecture (MCP Host-AI Engine vs. Internal Gemini API Fallback & `agy -p` Verification)** | **`GEMINI_API_KEY`: Not Required** (MCP Host-AI default)<br/>**Access Token: Not Required** (`noAuth: true`) | Zero-`GEMINI_API_KEY` MCP 1-Step Fast Path & 2-Step Prepare/Apply, `useInternalGemini: true` / `DOCUMENTOR_MCP_USE_INTERNAL_GEMINI=1` rollback, and non-interactive `agy -p --dangerously-skip-permissions` E2E verification | 2 min |
 
 ---
 
@@ -37,7 +37,7 @@ Every test scenario below is **100% self-contained**: it includes ready-to-copy 
 - **🔑 Required Credentials:** `GEMINI_API_KEY`: **Required** | Google Docs / Drive OAuth2 Access Token: **Required** (for Steps 3–4 & 6; **Not Required** for Step 5 `--no-auth`)
 
 ### Objective
-Verify that `gdocumentor` builds cleanly, passes all unit and integration tests, resolves Google Workspace OAuth2 credentials (via native in-process ADC) and `GEMINI_API_KEY`, and supports switching between **`gemini-3.8-flash`** (fast default), **`gemini-4-argon`** (deep reasoning), and English (`-l en`) / Japanese (`-l ja`) coaching output.
+Verify that `gdocumentor` builds cleanly, passes all unit and integration tests, resolves Google Workspace OAuth2 credentials (via native in-process ADC) and `GEMINI_API_KEY`, and supports switching between **`gemini-3.8-flash`** (fast default), **`gemini-4-hydrogen`** (`--model hydrogen`), **`gemini-4-carbon`** (`--model carbon`), **`gemini-4-argon`** (`--model argon`), and English (`-l en`) / Japanese (`-l ja`) coaching output.
 
 ### Self-Contained Procedure
 
@@ -706,12 +706,12 @@ rm -rf "$TEST_DIR"
 
 ## Test 13 — Dual AI Execution Architecture (MCP Host-AI Engine vs. Internal Gemini API Fallback & `agy -p` Non-Interactive Verification)
 
-- **🔑 Required Credentials:** `GEMINI_API_KEY`: **Not Required** (MCP Host-AI default; only required if explicitly running as a CLI tool or setting `useInternalGemini: true` / `GDOCUMENTOR_MCP_DEFAULT_ENGINE=gemini`) | Google Docs / Drive OAuth2 Access Token: **Not Required** (uses `noAuth: true`)
+- **🔑 Required Credentials:** `GEMINI_API_KEY`: **Not Required** (MCP Host-AI default; only required if explicitly running as a CLI tool or setting `useInternalGemini: true` / `DOCUMENTOR_MCP_USE_INTERNAL_GEMINI=1`) | Google Docs / Drive OAuth2 Access Token: **Not Required** (uses `noAuth: true`)
 
 ### Objective
 Verify that:
 1. **MCP Default (Client Agent / Host-AI Engine)**: Without setting `GEMINI_API_KEY`, `gdocumentor_proofread`, `gdocumentor_summary`, and `gdocumentor_draft` succeed in both the 1-Step Fast Path (passing `aiResult` directly) and the 2-Step Prepare/Apply workflow (`requiresAgentAi: true` + `preparedContext` ➔ `aiResult`).
-2. **Instant Rollback to Internal Gemini API**: Passing `"useInternalGemini": true` or setting `GDOCUMENTOR_MCP_DEFAULT_ENGINE=gemini` switches MCP execution back to the internal Gemini API client.
+2. **Instant Rollback to Internal Gemini API**: Passing `"useInternalGemini": true` or setting `DOCUMENTOR_MCP_USE_INTERNAL_GEMINI=1` switches MCP execution back to the internal Gemini API client.
 3. **Non-Interactive `agy -p` Host-AI E2E Verification**: Running `agy -p "..." --mode=accept-edits --dangerously-skip-permissions` allows the Host AI agent to orchestrate MCP tools and generate reports end-to-end with zero `GEMINI_API_KEY`.
 
 ### Self-Contained Procedure
@@ -737,7 +737,7 @@ rm -rf "$TEST_DIR"
 ```
 
 ### Expected Result
-- **Step 1**: `TestMCPHostAIAgentExecutionZeroGeminiKey` passes all sub-checks (Phase 1 `requiresAgentAi: true`, Phase 2 `AppliedSuggestionsCount: 1` without re-inserting the Google Doc, 1-Step Local Mode, `summary` 2-step, `draft` 1-step, and `GDOCUMENTOR_MCP_DEFAULT_ENGINE=gemini` fallback).
+- **Step 1**: `TestMCPHostAIAgentExecutionZeroGeminiKey` passes all sub-checks (Phase 1 `requiresAgentAi: true`, Phase 2 `AppliedSuggestionsCount: 1` without re-inserting the Google Doc, 1-Step Local Mode, `summary` 2-step, `draft` 1-step, and `DOCUMENTOR_MCP_USE_INTERNAL_GEMINI=1` fallback).
 - **Step 2**: With `GEMINI_API_KEY` unset, `gdocumentor mcp` returns `requiresAgentAi: true`, `model: "agent-ai"`, and a populated `preparedContext.userPrompt`.
 - **Step 3**: `agy` uses its own Host AI model to generate `aiResult` and saves `$TEST_DIR/agy_host_ai_report.md`, which is then cleaned up.
 

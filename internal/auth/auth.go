@@ -23,6 +23,8 @@ import (
 const (
 	DefaultModel     = "gemini-3.8-flash"
 	DeepModel        = "gemini-4-argon"
+	HydrogenModel    = "gemini-4-hydrogen"
+	CarbonModel      = "gemini-4-carbon"
 	EnvGeminiAPIKey  = "GEMINI_API_KEY"
 	EnvModel         = "DOCUMENTOR_MODEL"
 	EnvQuotaProject  = "GOOGLE_CLOUD_QUOTA_PROJECT"
@@ -145,16 +147,38 @@ func (m *Manager) ResolveGeminiAPIKey() (string, error) {
 	return "", errors.New("Gemini API key is not configured: pass --api-key or set the GEMINI_API_KEY environment variable")
 }
 
-// ResolveModel resolves the target Gemini model name.
+// ResolveModel resolves the target Gemini model name with shorthand alias expansion.
 // Any custom model name string is passed transparently to the Gemini API endpoint without rejection.
 func (m *Manager) ResolveModel() string {
-	if mod := strings.TrimSpace(m.opts.Model); mod != "" {
-		return mod
+	raw := strings.TrimSpace(m.opts.Model)
+	if raw == "" {
+		raw = strings.TrimSpace(os.Getenv(EnvModel))
 	}
-	if mod := strings.TrimSpace(os.Getenv(EnvModel)); mod != "" {
-		return mod
+	if raw == "" {
+		return DefaultModel
 	}
-	return DefaultModel
+	if len(raw) >= 7 && strings.EqualFold(raw[:7], "models/") {
+		raw = strings.TrimSpace(raw[7:])
+	}
+	if raw == "" {
+		return DefaultModel
+	}
+	lower := strings.ToLower(raw)
+	switch lower {
+	case "fast", "flash", "default":
+		return DefaultModel
+	case "deep", "argon", "pro":
+		return DeepModel
+	case "hydrogen":
+		return HydrogenModel
+	case "carbon":
+		return CarbonModel
+	default:
+		if strings.HasPrefix(lower, "gemini-") {
+			return lower
+		}
+		return raw
+	}
 }
 
 // GetAccessToken returns a valid Google OAuth2 access token using:

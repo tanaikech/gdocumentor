@@ -211,8 +211,8 @@ func RenderHeaderBanner(w io.Writer, subcommand, model, mode, lang string, authS
 	topLine := strings.Repeat("━", 76)
 	midLine := strings.Repeat("─", 76)
 	fmt.Fprintf(w, "\n%s┏%s┓%s\n", ansiCyan, topLine, ansiReset)
-	fmt.Fprintf(w, "%s┃%s  %s🎓 gdocumentor — DocuMentor AI%s %s(Go CLI · MCP Server · Antigravity v1.0.0)%s %s┃%s\n",
-		ansiCyan, ansiReset, ansiBold+ansiCyan, ansiReset, ansiDim, ansiReset, ansiCyan, ansiReset)
+	fmt.Fprintf(w, "%s┃%s  %s🎓 gdocumentor — DocuMentor AI%s %s(Go CLI · MCP Server · Antigravity v%-5s)%s %s┃%s\n",
+		ansiCyan, ansiReset, ansiBold+ansiCyan, ansiReset, ansiDim, Version, ansiReset, ansiCyan, ansiReset)
 	fmt.Fprintf(w, "%s┠%s┨%s\n", ansiCyan, midLine, ansiReset)
 
 	cmdDisp, _ := truncateRunes(subcommand, 10)

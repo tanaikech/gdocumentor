@@ -6,7 +6,7 @@
 
 ## Overview: Two Flexible Setup Tracks for Individual Users
 
-This guide walks **individual users** (independent writers, bloggers, students, academic researchers, and software engineers) through installing, configuring, and using **`gdocumentor` (`v1.0.0`, DocuMentor AI Go CLI, MCP Server & Antigravity Plugin)**.
+This guide walks **individual users** (independent writers, bloggers, students, academic researchers, and software engineers) through installing, configuring, and using **`gdocumentor` (`v1.0.1`, DocuMentor AI Go CLI, MCP Server & Antigravity Plugin)**.
 
 Depending on whether you want **instant local proofreading without Google Cloud setup** or **full Google Docs & Drive integration**, you can choose between two personal setup tracks:
 
@@ -92,7 +92,7 @@ Add your **Gemini API Key** to your shell profile (`~/.bashrc`, `~/.zshrc`, or P
 ```bash
 export GEMINI_API_KEY="your-gemini-api-key"
 
-# Optional: Set your preferred default model ("gemini-3.8-flash" is default; "gemini-4-argon" for deep reasoning)
+# Optional: Set your preferred default model ("gemini-3.8-flash" is default; also "gemini-4-hydrogen", "gemini-4-carbon", "gemini-4-argon")
 export DOCUMENTOR_MODEL="gemini-3.8-flash"
 ```
 
@@ -210,7 +210,7 @@ Tailor the AI coach's identity and enforce your personal or journal style rules:
 gdocumentor -i manuscript.md \
   --persona "You are a senior journal editor specializing in computer science clarity and active voice." \
   -r ./my_style_rules.md \
-  --model gemini-4-argon
+  --model gemini-4-carbon
 ```
 
 ### 4. Direct Google Docs Editing (`edit` — 0 Gemini Tokens) & Review Cleanup (`manage`)

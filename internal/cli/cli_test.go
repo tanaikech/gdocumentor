@@ -55,6 +55,20 @@ func TestParseArgsAndInputJSON(t *testing.T) {
 	if jsonOpts.Command != "summary" || jsonOpts.DocID != "doc_xyz" || jsonOpts.IncludeResolved || !jsonOpts.JSONOutput {
 		t.Fatalf("unexpected --input-json options: %+v", jsonOpts)
 	}
+
+	// Test Gemini 4 Hydrogen / Carbon flags & --gemini-base-url
+	g4Opts, err := ParseArgs([]string{
+		"proofread",
+		"-i", "article.md",
+		"--model", "gemini-4-hydrogen",
+		"--gemini-base-url", "https://gemini-proxy.internal.example.com",
+	})
+	if err != nil {
+		t.Fatalf("ParseArgs for gemini-4-hydrogen failed: %v", err)
+	}
+	if g4Opts.Model != "gemini-4-hydrogen" || g4Opts.GeminiBaseURL != "https://gemini-proxy.internal.example.com" {
+		t.Fatalf("unexpected Gemini 4 options: %+v", g4Opts)
+	}
 }
 
 func TestEndToEndProofreadJSONStreamSeparationAndTUI(t *testing.T) {

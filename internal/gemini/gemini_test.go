@@ -9,6 +9,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/tanaikech/gdocumentor/internal/gdocs"
 	"github.com/tanaikech/gdocumentor/internal/utf16idx"
@@ -29,13 +30,194 @@ func TestResolveModelName(t *testing.T) {
 	if got := ResolveModelName("argon"); got != DefaultDeepModel {
 		t.Fatalf("expected argon alias -> %q, got %q", DefaultDeepModel, got)
 	}
+	if got := ResolveModelName("hydrogen"); got != ModelGemini4Hydrogen {
+		t.Fatalf("expected hydrogen alias -> %q, got %q", ModelGemini4Hydrogen, got)
+	}
+	if got := ResolveModelName("carbon"); got != ModelGemini4Carbon {
+		t.Fatalf("expected carbon alias -> %q, got %q", ModelGemini4Carbon, got)
+	}
+	if got := ResolveModelName("gemini-4-hydrogen"); got != "gemini-4-hydrogen" {
+		t.Fatalf("expected gemini-4-hydrogen, got %q", got)
+	}
+	if got := ResolveModelName("gemini-4-carbon"); got != "gemini-4-carbon" {
+		t.Fatalf("expected gemini-4-carbon, got %q", got)
+	}
+	if got := ResolveModelName("Models/Gemini-4-Carbon"); got != "gemini-4-carbon" {
+		t.Fatalf("expected case-insensitive models/ prefix strip & lowercase, got %q", got)
+	}
 	if got := ResolveModelName("custom-experimental-model-99"); got != "custom-experimental-model-99" {
 		t.Fatalf("expected transparent pass-through for arbitrary model, got %q", got)
 	}
 
-	os.Setenv("DOCUMENTOR_MODEL", "gemini-4-argon")
-	if got := ResolveModelName(""); got != "gemini-4-argon" {
+	os.Setenv("DOCUMENTOR_MODEL", "gemini-4-hydrogen")
+	if got := ResolveModelName(""); got != "gemini-4-hydrogen" {
 		t.Fatalf("expected DOCUMENTOR_MODEL env override, got %q", got)
+	}
+}
+
+func TestGemini4ThoughtPartFilteringTemperatureOmissionAndTimeout(t *testing.T) {
+	if !SupportsTemperature("gemini-3.8-flash") {
+		t.Fatalf("expected SupportsTemperature=true for gemini-3.8-flash")
+	}
+	for _, m := range []string{"gemini-4-hydrogen", "gemini-4-carbon", "gemini-4-argon", "models/gemini-4-carbon"} {
+		if SupportsTemperature(m) {
+			t.Fatalf("expected SupportsTemperature=false for %q", m)
+		}
+	}
+
+	t.Setenv("DOCUMENTOR_HTTP_TIMEOUT", "")
+	if got := resolveHTTPTimeout(); got != DefaultHTTPTimeout {
+		t.Fatalf("expected DefaultHTTPTimeout %v, got %v", DefaultHTTPTimeout, got)
+	}
+	t.Setenv("DOCUMENTOR_HTTP_TIMEOUT", "300")
+	if got := resolveHTTPTimeout(); got != 300*time.Second {
+		t.Fatalf("expected 300s timeout, got %v", got)
+	}
+	t.Setenv("DOCUMENTOR_HTTP_TIMEOUT", "15m")
+	if got := resolveHTTPTimeout(); got != 15*time.Minute {
+		t.Fatalf("expected 15m timeout, got %v", got)
+	}
+	t.Setenv("DOCUMENTOR_HTTP_TIMEOUT", "")
+
+	var mu sync.Mutex
+	var capturedPayloads []map[string]any
+	var capturedPaths []string
+	mode := "thought_multipart"
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		capturedPaths = append(capturedPaths, r.URL.Path)
+		var p map[string]any
+		_ = json.NewDecoder(r.Body).Decode(&p)
+		capturedPayloads = append(capturedPayloads, p)
+		curMode := mode
+		mu.Unlock()
+
+		w.Header().Set("Content-Type", "application/json")
+		switch curMode {
+		case "thought_multipart":
+			mockRes := ProofreadResult{
+				OverallFeedback: "Reviewed with Gemini 4 Carbon.",
+				LearningSummary: LearningSummary{
+					RevisionsDigest:     "Checked clarity.",
+					WeakPointsAndHabits: []string{"Redundancy"},
+					ActionableTips:      []string{"Be concise"},
+				},
+				Suggestions: []utf16idx.RawSuggestion{},
+			}
+			fullBytes, _ := json.Marshal(mockRes)
+			half := len(fullBytes) / 2
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"candidates": []map[string]any{
+					{
+						"finishReason": "STOP",
+						"content": map[string]any{
+							"role": "model",
+							"parts": []map[string]any{
+								{"thought": true, "text": "Internal CoT reasoning that MUST NOT be parsed as JSON or inserted into Docs."},
+								{"thought": true, "text": ""},
+								{"text": string(fullBytes[:half])},
+								{"text": string(fullBytes[half:])},
+							},
+						},
+					},
+				},
+			})
+		case "draft_with_thought":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"candidates": []map[string]any{
+					{
+						"finishReason": "STOP",
+						"content": map[string]any{
+							"role": "model",
+							"parts": []map[string]any{
+								{"thought": true, "text": "Thinking about draft structure..."},
+								{"text": "# Clean Final Draft\n\nBody paragraph."},
+							},
+						},
+					},
+				},
+			})
+		case "max_tokens_truncated":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"candidates": []map[string]any{
+					{
+						"finishReason": "MAX_TOKENS",
+						"content": map[string]any{
+							"role": "model",
+							"parts": []map[string]any{
+								{"text": `{"overallFeedback": "truncated`},
+							},
+						},
+					},
+				},
+			})
+		}
+	}))
+	defer srv.Close()
+
+	// 1. Test gemini-4-carbon omits temperature and skips thought:true parts while joining split JSON parts
+	carbonClient, err := NewClient("test-key", "carbon")
+	if err != nil {
+		t.Fatalf("NewClient(carbon) failed: %v", err)
+	}
+	carbonClient.SetBaseURL(srv.URL)
+	docData := &gdocs.ParsedDocument{DocumentID: "d1", AnnotatedText: "Hello world."}
+	res, err := carbonClient.GenerateProofreading(context.Background(), ProofreadPromptOptions{
+		DocData: docData,
+		Lang:    "en",
+	})
+	if err != nil {
+		t.Fatalf("GenerateProofreading on gemini-4-carbon failed: %v", err)
+	}
+	if res.OverallFeedback != "Reviewed with Gemini 4 Carbon." {
+		t.Fatalf("unexpected OverallFeedback: %q", res.OverallFeedback)
+	}
+	if !strings.Contains(capturedPaths[0], "/v1beta/models/gemini-4-carbon:generateContent") {
+		t.Fatalf("expected gemini-4-carbon endpoint, got %q", capturedPaths[0])
+	}
+	if genCfg, ok := capturedPayloads[0]["generationConfig"].(map[string]any); ok {
+		if _, hasTemp := genCfg["temperature"]; hasTemp {
+			t.Fatalf("expected temperature to be omitted for gemini-4-carbon, got %+v", genCfg)
+		}
+	}
+
+	// 2. Test gemini-4-hydrogen draft generation omits empty generationConfig and never leaks thought:true text
+	mu.Lock()
+	mode = "draft_with_thought"
+	mu.Unlock()
+	hydrogenClient, err := NewClient("test-key", "gemini-4-hydrogen")
+	if err != nil {
+		t.Fatalf("NewClient(gemini-4-hydrogen) failed: %v", err)
+	}
+	hydrogenClient.SetBaseURL(srv.URL)
+	draftText, err := hydrogenClient.GenerateInitialDraft(context.Background(), DraftPromptOptions{
+		Lang:         "en",
+		CustomPrompt: "Write an introduction.",
+	})
+	if err != nil {
+		t.Fatalf("GenerateInitialDraft on gemini-4-hydrogen failed: %v", err)
+	}
+	if strings.Contains(draftText, "Thinking about draft") || !strings.HasPrefix(draftText, "# Clean Final Draft") {
+		t.Fatalf("thought text leaked or draft corrupted: %q", draftText)
+	}
+	if !strings.Contains(capturedPaths[1], "/v1beta/models/gemini-4-hydrogen:generateContent") {
+		t.Fatalf("expected gemini-4-hydrogen endpoint, got %q", capturedPaths[1])
+	}
+	if _, hasGenCfg := capturedPayloads[1]["generationConfig"]; hasGenCfg {
+		t.Fatalf("expected empty generationConfig to be omitted in draft for gemini-4-hydrogen")
+	}
+
+	// 3. Test MAX_TOKENS truncation surfaces explicit finishReason=MAX_TOKENS error
+	mu.Lock()
+	mode = "max_tokens_truncated"
+	mu.Unlock()
+	_, maxErr := hydrogenClient.GenerateProofreading(context.Background(), ProofreadPromptOptions{
+		DocData: docData,
+		Lang:    "en",
+	})
+	if maxErr == nil || !strings.Contains(maxErr.Error(), "MAX_TOKENS") {
+		t.Fatalf("expected explicit MAX_TOKENS diagnostic error, got: %v", maxErr)
 	}
 }
 

@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -25,6 +26,12 @@ const (
 	DefaultFastModel = "gemini-3.8-flash"
 	// DefaultDeepModel is the high-precision deep-reasoning model for complex multi-file reviews.
 	DefaultDeepModel = "gemini-4-argon"
+	// ModelGemini4Hydrogen is Google's high-efficiency, high-speed Gemini 4 model for iterative and agentic workflows.
+	ModelGemini4Hydrogen = "gemini-4-hydrogen"
+	// ModelGemini4Carbon is Google's frontier Gemini 4 deep-reasoning model for complex architecture, code, and manuscripts.
+	ModelGemini4Carbon = "gemini-4-carbon"
+	// DefaultHTTPTimeout is the default HTTP timeout (10 minutes) accommodating deep thinking on Gemini 4 models.
+	DefaultHTTPTimeout = 600 * time.Second
 	// DefaultMaxInlineTextBytes is the threshold (2 MB) above which text contexts overflow to the Gemini File API.
 	DefaultMaxInlineTextBytes = 2 * 1024 * 1024
 )
@@ -133,18 +140,38 @@ func NewClient(explicitAPIKey, explicitModel string) (*Client, error) {
 	}
 
 	model := ResolveModelName(explicitModel)
+	baseURL := "https://generativelanguage.googleapis.com"
+	if envBase := strings.TrimRight(strings.TrimSpace(os.Getenv("GEMINI_BASE_URL")), "/"); envBase != "" {
+		baseURL = envBase
+	}
 
 	return &Client{
 		apiKey:             apiKey,
 		model:              model,
-		baseURL:            "https://generativelanguage.googleapis.com",
-		httpClient:         &http.Client{Timeout: 180 * time.Second},
+		baseURL:            baseURL,
+		httpClient:         &http.Client{Timeout: resolveHTTPTimeout()},
 		maxInlineTextBytes: DefaultMaxInlineTextBytes,
 	}, nil
 }
 
+// resolveHTTPTimeout returns DefaultHTTPTimeout (600s) unless overridden via DOCUMENTOR_HTTP_TIMEOUT
+// (accepts Go duration strings like "300s"/"15m" or positive integer seconds like "300").
+func resolveHTTPTimeout() time.Duration {
+	raw := strings.TrimSpace(os.Getenv("DOCUMENTOR_HTTP_TIMEOUT"))
+	if raw == "" {
+		return DefaultHTTPTimeout
+	}
+	if d, err := time.ParseDuration(raw); err == nil && d > 0 {
+		return d
+	}
+	if secs, err := strconv.Atoi(raw); err == nil && secs > 0 {
+		return time.Duration(secs) * time.Second
+	}
+	return DefaultHTTPTimeout
+}
+
 // ResolveModelName resolves the Gemini model name from explicit flag -> DOCUMENTOR_MODEL env var -> DefaultFastModel.
-// Any arbitrary model identifier is preserved transparently without hardcoded rejection.
+// Supports shorthand aliases ("flash", "argon", "hydrogen", "carbon") while preserving any arbitrary model identifier transparently.
 func ResolveModelName(explicitModel string) string {
 	raw := strings.TrimSpace(explicitModel)
 	if raw == "" {
@@ -153,15 +180,39 @@ func ResolveModelName(explicitModel string) string {
 	if raw == "" {
 		return DefaultFastModel
 	}
-	raw = strings.TrimPrefix(raw, "models/")
-	switch strings.ToLower(raw) {
+	if len(raw) >= 7 && strings.EqualFold(raw[:7], "models/") {
+		raw = strings.TrimSpace(raw[7:])
+	}
+	if raw == "" {
+		return DefaultFastModel
+	}
+	lower := strings.ToLower(raw)
+	switch lower {
 	case "fast", "flash", "default":
 		return DefaultFastModel
 	case "deep", "argon", "pro":
 		return DefaultDeepModel
+	case "hydrogen":
+		return ModelGemini4Hydrogen
+	case "carbon":
+		return ModelGemini4Carbon
 	default:
+		if strings.HasPrefix(lower, "gemini-") {
+			return lower
+		}
 		return raw
 	}
+}
+
+// SupportsTemperature reports whether custom sampling temperature should be included in generationConfig.
+// Gemini 4 reasoning models (gemini-4-hydrogen, gemini-4-carbon, gemini-4-argon, etc.) deprecate/ignore custom
+// temperature in favor of calibrated internal reasoning and responseSchema enforcement.
+func SupportsTemperature(model string) bool {
+	norm := strings.ToLower(strings.TrimSpace(model))
+	if len(norm) >= 7 && strings.EqualFold(norm[:7], "models/") {
+		norm = strings.TrimSpace(norm[7:])
+	}
+	return !strings.HasPrefix(norm, "gemini-4")
 }
 
 // Model returns the configured Gemini model identifier.
@@ -314,30 +365,37 @@ func (c *Client) DeleteUploadedFiles(ctx context.Context, files []*UploadedFile)
 	return deleted
 }
 
-// callGenerateContent invokes POST /v1beta/models/{model}:generateContent and returns the text of the first candidate part.
+// callGenerateContent invokes POST /v1beta/models/{model}:generateContent and returns the concatenated non-thought text.
 func (c *Client) callGenerateContent(ctx context.Context, payload map[string]any) (string, error) {
+	text, _, err := c.callGenerateContentWithFinishReason(ctx, payload)
+	return text, err
+}
+
+// callGenerateContentWithFinishReason invokes POST /v1beta/models/{model}:generateContent, filters out internal
+// reasoning parts (`thought: true`), concatenates all non-thought text parts, and returns (text, finishReason, error).
+func (c *Client) callGenerateContentWithFinishReason(ctx context.Context, payload map[string]any) (string, string, error) {
 	endpoint := fmt.Sprintf("%s/v1beta/models/%s:generateContent?key=%s", c.baseURL, url.PathEscape(c.model), url.QueryEscape(c.apiKey))
 	var bodyBuf bytes.Buffer
 	enc := json.NewEncoder(&bodyBuf)
 	enc.SetEscapeHTML(false)
 	if err := enc.Encode(payload); err != nil {
-		return "", err
+		return "", "", err
 	}
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, &bodyBuf)
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
 	req.Header.Set("Content-Type", "application/json")
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
-		return "", fmt.Errorf("Gemini API request failed: %w", err)
+		return "", "", fmt.Errorf("Gemini API request failed [model=%s]: %w", c.model, err)
 	}
 	respBody, err := io.ReadAll(resp.Body)
 	resp.Body.Close()
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
 
 	if resp.StatusCode != http.StatusOK {
@@ -347,32 +405,62 @@ func (c *Client) callGenerateContent(ctx context.Context, payload map[string]any
 			} `json:"error"`
 		}
 		if json.Unmarshal(respBody, &errEnv) == nil && errEnv.Error.Message != "" {
-			return "", fmt.Errorf("Gemini API Error (%d) [model=%s]: %s", resp.StatusCode, c.model, errEnv.Error.Message)
+			return "", "", fmt.Errorf("Gemini API Error (%d) [model=%s]: %s", resp.StatusCode, c.model, errEnv.Error.Message)
 		}
-		return "", fmt.Errorf("Gemini API Error (%d) [model=%s]: %s", resp.StatusCode, c.model, string(respBody))
+		return "", "", fmt.Errorf("Gemini API Error (%d) [model=%s]: %s", resp.StatusCode, c.model, string(respBody))
 	}
 
 	var parsed struct {
+		PromptFeedback struct {
+			BlockReason string `json:"blockReason"`
+		} `json:"promptFeedback"`
 		Candidates []struct {
-			Content struct {
+			FinishReason string `json:"finishReason"`
+			Content      struct {
 				Parts []struct {
-					Text string `json:"text"`
+					Text    string `json:"text"`
+					Thought bool   `json:"thought"`
 				} `json:"parts"`
 			} `json:"content"`
 		} `json:"candidates"`
 	}
 	if err := json.Unmarshal(respBody, &parsed); err != nil {
-		return "", fmt.Errorf("failed to parse Gemini API response JSON: %w", err)
+		return "", "", fmt.Errorf("failed to parse Gemini API response JSON: %w", err)
 	}
-	if len(parsed.Candidates) == 0 || len(parsed.Candidates[0].Content.Parts) == 0 {
-		return "", errors.New("received an empty response from Gemini API")
+	if len(parsed.Candidates) == 0 {
+		if br := strings.TrimSpace(parsed.PromptFeedback.BlockReason); br != "" {
+			return "", br, fmt.Errorf("Gemini API blocked prompt [model=%s, blockReason=%s]", c.model, br)
+		}
+		return "", "", fmt.Errorf("received an empty response from Gemini API [model=%s]", c.model)
 	}
 
-	rawText := strings.TrimSpace(parsed.Candidates[0].Content.Parts[0].Text)
-	if rawText == "" {
-		return "", errors.New("received an empty text candidate from Gemini API")
+	cand := parsed.Candidates[0]
+	finishReason := strings.TrimSpace(cand.FinishReason)
+	if len(cand.Content.Parts) == 0 {
+		if finishReason != "" {
+			return "", finishReason, fmt.Errorf("received an empty response from Gemini API [model=%s, finishReason=%s]", c.model, finishReason)
+		}
+		return "", "", fmt.Errorf("received an empty response from Gemini API [model=%s]", c.model)
 	}
-	return rawText, nil
+
+	var outBuilder strings.Builder
+	for _, part := range cand.Content.Parts {
+		if part.Thought {
+			continue
+		}
+		if part.Text != "" {
+			outBuilder.WriteString(part.Text)
+		}
+	}
+
+	rawText := strings.TrimSpace(outBuilder.String())
+	if rawText == "" {
+		if finishReason != "" {
+			return "", finishReason, fmt.Errorf("received an empty text candidate from Gemini API [model=%s, finishReason=%s]", c.model, finishReason)
+		}
+		return "", "", fmt.Errorf("received an empty text candidate from Gemini API [model=%s]", c.model)
+	}
+	return rawText, finishReason, nil
 }
 
 // buildHybridContextParts implements the Hybrid Context Optimization strategy:

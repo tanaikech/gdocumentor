@@ -138,7 +138,7 @@ func FetchRemoteURLContent(rawURL string) (displayName string, textContent strin
 	if err != nil {
 		return "", "", nil, "", fmt.Errorf("invalid URL %q: %w", rawURL, err)
 	}
-	req.Header.Set("User-Agent", "gdocumentor/1.0.0 (+https://github.com/tanaikech/gdocumentor)")
+	req.Header.Set("User-Agent", "gdocumentor/1.0.1 (+https://github.com/tanaikech/gdocumentor)")
 	req.Header.Set("Accept", "text/markdown, text/plain, text/html, application/xhtml+xml, application/pdf, */*;q=0.8")
 
 	resp, err := RemoteHTTPClient.Do(req)
