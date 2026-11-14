@@ -5,6 +5,7 @@ import (
 	"math"
 	"sort"
 	"strings"
+	"unicode/utf16"
 	"unicode/utf8"
 
 	"github.com/tanaikech/gdocumentor/internal/utf16idx"
@@ -148,26 +149,29 @@ type VisualElement struct {
 
 // ParsedDocument holds the structured representation of a Google Document tab.
 type ParsedDocument struct {
-	DocumentID          string                   `json:"documentId"`
-	Title               string                   `json:"title"`
-	ActiveTabID         string                   `json:"activeTabId"`
-	ActiveTabTitle      string                   `json:"activeTabTitle"`
-	SelectionOnly       bool                     `json:"selectionOnly"`
-	SelectionRanges     []utf16idx.RangeInterval `json:"selectionRanges,omitempty"`
-	SelectedTextPreview string                   `json:"selectedTextPreview,omitempty"`
-	IsEmpty             bool                     `json:"isEmpty"`
-	CharCount           int                      `json:"charCount"`
-	AnnotatedText       string                   `json:"annotatedText"`
-	EditableBlocks      []utf16idx.EditableBlock `json:"editableBlocks"`
-	ExistingSuggestions []ExistingSuggestion     `json:"existingSuggestions"`
-	ExistingComments    []ActiveComment          `json:"existingComments"`
-	ResolvedReviews     []ResolvedReview         `json:"resolvedReviews"`
-	AllSuggestionIDs    []string                 `json:"allSuggestionIds"`
-	AllAICommentIDs     []string                 `json:"allAiCommentIds"`
-	AllCommentIDs       []string                 `json:"allCommentIds"`
-	Tables              []TableElement           `json:"tables"`
-	VisualElements      []VisualElement          `json:"visualElements"`
-	DecisionRecord      *DecisionRecordSummary   `json:"decisionRecord,omitempty"`
+	DocumentID          string                         `json:"documentId"`
+	RevisionID          string                         `json:"revisionId,omitempty"`
+	Title               string                         `json:"title"`
+	ActiveTabID         string                         `json:"activeTabId"`
+	ActiveTabTitle      string                         `json:"activeTabTitle"`
+	SelectionOnly       bool                           `json:"selectionOnly"`
+	SelectionRanges     []utf16idx.RangeInterval       `json:"selectionRanges,omitempty"`
+	ScopeAnchors        []utf16idx.ScopeBoundaryAnchor `json:"scopeAnchors,omitempty"`
+	SelectedTextPreview string                         `json:"selectedTextPreview,omitempty"`
+	IsEmpty             bool                           `json:"isEmpty"`
+	CharCount           int                            `json:"charCount"`
+	AnnotatedText       string                         `json:"annotatedText"`
+	EditableBlocks      []utf16idx.EditableBlock       `json:"editableBlocks"`
+	ExistingSuggestions []ExistingSuggestion           `json:"existingSuggestions"`
+	ExistingComments    []ActiveComment                `json:"existingComments"`
+	ResolvedReviews     []ResolvedReview               `json:"resolvedReviews"`
+	AllSuggestionIDs    []string                       `json:"allSuggestionIds"`
+	AllAICommentIDs     []string                       `json:"allAiCommentIds"`
+	AllCommentIDs       []string                       `json:"allCommentIds"`
+	Tables              []TableElement                 `json:"tables"`
+	VisualElements      []VisualElement                `json:"visualElements"`
+	DecisionRecord      *DecisionRecordSummary         `json:"decisionRecord,omitempty"`
+	SettledBuffer       *utf16idx.SettledUTF16Buffer   `json:"-"`
 }
 
 // ParseOptions configures how ParseDocumentStructure scopes and extracts document content.
@@ -750,13 +754,21 @@ func ParseDocumentStructure(docJSON map[string]any, opts ParseOptions) *ParsedDo
 		len(activeCommentsList) == 0 &&
 		len(resolvedReviewsList) == 0
 
+	settledBuf := buildSettledUTF16BufferFromElements(bodyContent)
+	var scopeAnchors []utf16idx.ScopeBoundaryAnchor
+	if opts.SelectionOnly && len(selectionRanges) > 0 {
+		scopeAnchors = utf16idx.BuildScopeBoundaryAnchors(selectionRanges, settledBuf)
+	}
+
 	return &ParsedDocument{
 		DocumentID:          getString(docJSON, "documentId"),
+		RevisionID:          strings.TrimSpace(getString(docJSON, "revisionId")),
 		Title:               getString(docJSON, "title"),
 		ActiveTabID:         activeTabID,
 		ActiveTabTitle:      activeTabTitle,
 		SelectionOnly:       opts.SelectionOnly,
 		SelectionRanges:     selectionRanges,
+		ScopeAnchors:        scopeAnchors,
 		SelectedTextPreview: selectedTextPreview,
 		IsEmpty:             isEmpty,
 		CharCount:           effectiveCharCount,
@@ -771,7 +783,97 @@ func ParseDocumentStructure(docJSON map[string]any, opts ParseOptions) *ParsedDo
 		Tables:              targetTables,
 		VisualElements:      targetVisuals,
 		DecisionRecord:      decisionRecord,
+		SettledBuffer:       settledBuf,
 	}
+}
+
+// ComputeTableSignature builds a compact structural + header-content signature for a TableElement
+// so Phase 2 table comments track the intended table even if another table is concurrently inserted above it
+// (stripping the ordinal "[TABLE_N (...)]" prefix so ordinal renumbering TABLE_1 -> TABLE_2 never alters the signature).
+func ComputeTableSignature(t TableElement) string {
+	md := strings.TrimSpace(t.Markdown)
+	if strings.HasPrefix(md, "[TABLE_") {
+		if closeIdx := strings.IndexByte(md, ']'); closeIdx >= 0 {
+			md = strings.TrimSpace(md[closeIdx+1:])
+		}
+	}
+	norm := strings.Join(strings.Fields(md), " ")
+	runes := []rune(norm)
+	if len(runes) > 120 {
+		norm = string(runes[:120])
+	}
+	return fmt.Sprintf("%dx%d:%s", t.RowsCount, t.ColsCount, norm)
+}
+
+// buildSettledUTF16BufferFromElements constructs a tab-wide SettledUTF16Buffer excluding BOTH
+// suggestedInsertionIds and suggestedDeletionIds (matching ParseDocumentStructure's settled-text contract).
+func buildSettledUTF16BufferFromElements(elements []any) *utf16idx.SettledUTF16Buffer {
+	buf := &utf16idx.SettledUTF16Buffer{}
+	var walk func(elems []any)
+	walk = func(elems []any) {
+		for _, rawSt := range elems {
+			st, ok := rawSt.(map[string]any)
+			if !ok {
+				continue
+			}
+			if para := getMap(st, "paragraph"); len(para) > 0 {
+				for _, rawPE := range getSlice(para, "elements") {
+					pe, ok := rawPE.(map[string]any)
+					if !ok {
+						continue
+					}
+					if inlineObj := getMap(pe, "inlineObjectElement"); len(inlineObj) > 0 {
+						if len(getStringSlice(inlineObj, "suggestedDeletionIds")) == 0 &&
+							len(getStringSlice(inlineObj, "suggestedInsertionIds")) == 0 {
+							startIdx := getInt(pe, "startIndex")
+							if startIdx > 0 {
+								buf.Units = append(buf.Units, 0xFFFC)
+								buf.DocIndices = append(buf.DocIndices, startIdx)
+							}
+						}
+						continue
+					}
+					tr := getMap(pe, "textRun")
+					if len(tr) == 0 {
+						continue
+					}
+					if len(getStringSlice(tr, "suggestedDeletionIds")) > 0 ||
+						len(getStringSlice(tr, "suggestedInsertionIds")) > 0 {
+						continue
+					}
+					text := getString(tr, "content")
+					if text == "" {
+						continue
+					}
+					startIdx := getInt(pe, "startIndex")
+					if startIdx <= 0 {
+						startIdx = 1
+					}
+					u16 := utf16.Encode([]rune(text))
+					for offset, unit := range u16 {
+						buf.Units = append(buf.Units, unit)
+						buf.DocIndices = append(buf.DocIndices, startIdx+offset)
+					}
+				}
+			} else if tbl := getMap(st, "table"); len(tbl) > 0 {
+				for _, rawRow := range getSlice(tbl, "tableRows") {
+					row, ok := rawRow.(map[string]any)
+					if !ok {
+						continue
+					}
+					for _, rawCell := range getSlice(row, "tableCells") {
+						cell, ok := rawCell.(map[string]any)
+						if !ok {
+							continue
+						}
+						walk(getSlice(cell, "content"))
+					}
+				}
+			}
+		}
+	}
+	walk(elements)
+	return buf
 }
 
 // ExtractPlainTextFromDocsJSON extracts plain text (including tables and all tabs) from a raw Docs JSON object.

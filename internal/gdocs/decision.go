@@ -39,13 +39,18 @@ type DecisionCounters struct {
 
 // LastRunStats holds the counters and metadata for the most recent AI proofreading run.
 type LastRunStats struct {
-	RunID     string `json:"runId"`
-	Timestamp string `json:"timestamp"`
-	Issued    int    `json:"issued"`
-	Accepted  int    `json:"accepted"`
-	Edited    int    `json:"edited"`
-	Rejected  int    `json:"rejected"`
-	Expired   int    `json:"expired"`
+	RunID             string `json:"runId"`
+	Timestamp         string `json:"timestamp"`
+	Issued            int    `json:"issued"`
+	Accepted          int    `json:"accepted"`
+	Edited            int    `json:"edited"`
+	Rejected          int    `json:"rejected"`
+	Expired           int    `json:"expired"`
+	SourceRevisionID  string `json:"sourceRevisionId,omitempty"`
+	AppliedRevisionID string `json:"appliedRevisionId,omitempty"`
+	RevisionRetries   int    `json:"revisionRetries,omitempty"`
+	ReanchoredCount   int    `json:"reanchoredCount,omitempty"`
+	StaleSkippedCount int    `json:"staleSkippedCount,omitempty"`
 }
 
 // PendingDecisionItem represents an active AI-issued inline suggestion tracked for future reconciliation.
@@ -100,15 +105,20 @@ type CumulativeDecisionSummary struct {
 
 // LastRunDecisionSummary is the client-facing summary of the most recent proofreading pass.
 type LastRunDecisionSummary struct {
-	RunID      string `json:"runId"`
-	Timestamp  string `json:"timestamp"`
-	Issued     int    `json:"issued"`
-	Accepted   int    `json:"accepted"`
-	Edited     int    `json:"edited"`
-	Rejected   int    `json:"rejected"`
-	Expired    int    `json:"expired"`
-	Decided    int    `json:"decided"`
-	ImpactRate *int   `json:"impactRate"`
+	RunID             string `json:"runId"`
+	Timestamp         string `json:"timestamp"`
+	Issued            int    `json:"issued"`
+	Accepted          int    `json:"accepted"`
+	Edited            int    `json:"edited"`
+	Rejected          int    `json:"rejected"`
+	Expired           int    `json:"expired"`
+	Decided           int    `json:"decided"`
+	ImpactRate        *int   `json:"impactRate"`
+	SourceRevisionID  string `json:"sourceRevisionId,omitempty"`
+	AppliedRevisionID string `json:"appliedRevisionId,omitempty"`
+	RevisionRetries   int    `json:"revisionRetries,omitempty"`
+	ReanchoredCount   int    `json:"reanchoredCount,omitempty"`
+	StaleSkippedCount int    `json:"staleSkippedCount,omitempty"`
 }
 
 // DecisionRecordSummary is the client-facing Coach Impact & Decision Record payload.
@@ -557,15 +567,20 @@ func BuildClientDecisionRecordSummary(record *RawDecisionRecord, activeAISuggest
 			RejectRate:   rejectRate,
 		},
 		LastRun: LastRunDecisionSummary{
-			RunID:      lr.RunID,
-			Timestamp:  lr.Timestamp,
-			Issued:     lr.Issued,
-			Accepted:   lr.Accepted,
-			Edited:     lr.Edited,
-			Rejected:   lr.Rejected,
-			Expired:    lr.Expired,
-			Decided:    lrDecided,
-			ImpactRate: lrImpactRate,
+			RunID:             lr.RunID,
+			Timestamp:         lr.Timestamp,
+			Issued:            lr.Issued,
+			Accepted:          lr.Accepted,
+			Edited:            lr.Edited,
+			Rejected:          lr.Rejected,
+			Expired:           lr.Expired,
+			Decided:           lrDecided,
+			ImpactRate:        lrImpactRate,
+			SourceRevisionID:  lr.SourceRevisionID,
+			AppliedRevisionID: lr.AppliedRevisionID,
+			RevisionRetries:   lr.RevisionRetries,
+			ReanchoredCount:   lr.ReanchoredCount,
+			StaleSkippedCount: lr.StaleSkippedCount,
 		},
 		PendingAICount:              pendingAICount,
 		ActiveHumanSuggestionsCount: activeHumanSuggestionsCount,
@@ -804,6 +819,12 @@ func ReconcileDecisionRecordWithTab(params ReconcileParams) *DecisionRecordSumma
 
 // RegisterIssuedAISuggestions registers newly applied AI inline suggestions at the end of Step 4.
 func RegisterIssuedAISuggestions(docID string, issuedItems []IssuedAISuggestionInput, activeTabID string) *DecisionRecordSummary {
+	return RegisterIssuedAISuggestionsWithRevision(docID, issuedItems, activeTabID, nil)
+}
+
+// RegisterIssuedAISuggestionsWithRevision registers newly applied AI inline suggestions along with
+// optional optimistic revision-control telemetry without counting unapplied stale items into Cumulative.Issued.
+func RegisterIssuedAISuggestionsWithRevision(docID string, issuedItems []IssuedAISuggestionInput, activeTabID string, rev *RevisionControlSummary) *DecisionRecordSummary {
 	decisionMu.Lock()
 	defer decisionMu.Unlock()
 
@@ -816,7 +837,8 @@ func RegisterIssuedAISuggestions(docID string, issuedItems []IssuedAISuggestionI
 			validItems = append(validItems, it)
 		}
 	}
-	if len(validItems) == 0 {
+	hasRevTelemetry := rev != nil && (rev.SourceRevisionID != "" || rev.AppliedRevisionID != "" || rev.RevisionRetries > 0 || rev.ReanchoredCount > 0 || rev.StaleSkippedCount > 0)
+	if len(validItems) == 0 && !hasRevTelemetry {
 		return BuildClientDecisionRecordSummary(record, nil, 0)
 	}
 
@@ -824,11 +846,19 @@ func RegisterIssuedAISuggestions(docID string, issuedItems []IssuedAISuggestionI
 	nowMs := now.UnixMilli()
 	runID := "run_" + time.Now().Format("20060102150405.000")
 
-	record.LastRun = LastRunStats{
+	lr := LastRunStats{
 		RunID:     runID,
 		Timestamp: now.Format(time.RFC3339),
 		Issued:    len(validItems),
 	}
+	if rev != nil {
+		lr.SourceRevisionID = rev.SourceRevisionID
+		lr.AppliedRevisionID = rev.AppliedRevisionID
+		lr.RevisionRetries = rev.RevisionRetries
+		lr.ReanchoredCount = rev.ReanchoredCount
+		lr.StaleSkippedCount = rev.StaleSkippedCount
+	}
+	record.LastRun = lr
 	record.Cumulative.Issued += len(validItems)
 
 	existingIDs := make(map[string]bool, len(record.Pending))

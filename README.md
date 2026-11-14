@@ -3,7 +3,7 @@
 
 ![gdocumentor Overview Infographic](images/gdocumentor_infographic.jpg)
 
-[![Version](https://img.shields.io/badge/Version-v1.0.1-10b981.svg)](https://github.com/tanaikech/gdocumentor)
+[![Version](https://img.shields.io/badge/Version-v1.1.0-10b981.svg)](https://github.com/tanaikech/gdocumentor)
 [![Go Version](https://img.shields.io/badge/Go-1.27%2B-00ADD8?logo=go)](https://go.dev/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Google Docs API v1](https://img.shields.io/badge/Google%20Docs%20API-v1-4285F4?logo=googledocs)](https://developers.google.com/workspace/docs/api)
@@ -11,11 +11,11 @@
 
 **[👤 Individual Setup (`INSTALL_INDIVIDUAL.md`)](INSTALL_INDIVIDUAL.md)** | **[🤖 Multi-Agent & Windows 11 ↔ WSL2 Guide (`INSTALL_AI_AGENTS.md`)](INSTALL_AI_AGENTS.md)** | **[🏫 School & Organization Setup (`INSTALL_ORGANIZATION.md`)](INSTALL_ORGANIZATION.md)** | **[⚡ 21 One-Command Test Cookbook (`TEST_COMMANDS.md`)](TEST_COMMANDS.md)** | **[🧪 End-to-End Verification Guide (`TESTING_GUIDE.md`)](TESTING_GUIDE.md)** | **[🤖 Agent Skill Specification (`skills/documentor-ai/SKILL.md`)](skills/documentor-ai/SKILL.md)** | **[📋 JSON I/O Schema (`skills/documentor-ai/references/json_schema.md`)](skills/documentor-ai/references/json_schema.md)**
 
-**gdocumentor (`v1.0.1`, `DocuMentor AI`)** is a high-performance Golang CLI tool, **Global Model Context Protocol (MCP) Server (`gdocumentor mcp`)**, and **Google Antigravity Agent Skill / Plugin** that transforms Generative AI from a passive "ghostwriter" into an interactive **Writing & Code Review Coach**—featuring a **Dual AI Execution Architecture**:
+**gdocumentor (`v1.1.0`, `DocuMentor AI`)** is a high-performance Golang CLI tool, **Global Model Context Protocol (MCP) Server (`gdocumentor mcp`)**, and **Google Antigravity Agent Skill / Plugin** that transforms Generative AI from a passive "ghostwriter" into an interactive **Writing & Code Review Coach**—featuring a **Dual AI Execution Architecture**:
 - **Standalone CLI Mode (`gdocumentor`)**: Directly calls the **Gemini API (`GEMINI_API_KEY`)** in-process for fast, self-contained 1-command terminal, batch script, and CI/CD execution—supporting both **Google Docs Native Suggesting Mode (`WriteMode.SUGGEST` & `insertComment`)** (with a Google OAuth2 Access Token) and **Access-Token-Free Local File & Public URL Mode (`--no-auth` / `-o <file>`)**.
-- **MCP Server Mode (`gdocumentor mcp`)**: Leverages the **client-side AI Agent's own LLM (Host AI)**—such as **Google Antigravity (`agy`)**, Claude Desktop, Cursor, or Windsurf—**without requiring `GEMINI_API_KEY` inside `gdocumentor`**, while `gdocumentor` handles all deterministic workspace/dependency/RAG resolution, surrogate-pair-safe UTF-16 coordinate matching, and Google Docs API `batchUpdate` automation (with optional fallback to internal Gemini API via `useInternalGemini: true`).
+- **MCP Server Mode (`gdocumentor mcp`)**: Leverages the **client-side AI Agent's own LLM (Host AI)**—such as **Google Antigravity (`agy`)**, Claude Desktop, Cursor, or Windsurf—**without requiring `GEMINI_API_KEY` inside `gdocumentor`**, while `gdocumentor` handles all deterministic workspace/dependency/RAG resolution, surrogate-pair-safe UTF-16 coordinate matching, optimistic revision locking & concurrent edit re-anchoring, and Google Docs API `batchUpdate` automation (with optional fallback to internal Gemini API via `useInternalGemini: true`).
 
-Ported from and extending the original Google Apps Script [DocuMentor AI](https://github.com/tanaikech/DocuMentorAI), this Go edition (`v1.0.1`) adds native **Pageless Google Docs** conversion for `.md`/`.txt`/`.pdf`/`.docx` (with parallel Base64 local image embedding), script insertion for source code files, deterministic line and character range scoping (`--target`, `--range`), automatic cross-file dependency resolution (`--auto-deps`), full `sync.WaitGroup` pipeline concurrency, custom AI Coach Persona via RAG rulebooks (`# AIの位置づけ` / `--persona`), **Coach Impact & Decision Record** tracking, a dedicated **Google Docs Coaching Summary Tab (`--summary-tab`)**, direct zero-token Google Docs editing (`edit`), and a triple interface: **Graphical CLI TUI**, **Strict Pure JSON (`--json`)**, and **Global MCP Server (`gdocumentor mcp`)**.
+Ported from and extending the original Google Apps Script [DocuMentor AI](https://github.com/tanaikech/DocuMentorAI), this Go edition (`v1.1.0`) adds native **Pageless Google Docs** conversion for `.md`/`.txt`/`.pdf`/`.docx` (with parallel Base64 local image embedding), script insertion for source code files, deterministic line and character range scoping (`--target`, `--range`), automatic cross-file dependency resolution (`--auto-deps`), full `sync.WaitGroup` pipeline concurrency, **Zero-Overhead Optimistic Revision Control & Context-Aware UTF-16 Re-Anchoring (`WriteControl.requiredRevisionId`)** for safe real-time collaborative editing, custom AI Coach Persona via RAG rulebooks (`# AIの位置づけ` / `--persona`), **Coach Impact & Decision Record** tracking, a dedicated **Google Docs Coaching Summary Tab (`--summary-tab`)**, direct zero-token Google Docs editing (`edit`), and a triple interface: **Graphical CLI TUI**, **Strict Pure JSON (`--json`)**, and **Global MCP Server (`gdocumentor mcp`)**.
 
 ---
 
@@ -121,6 +121,10 @@ Reading these articles sparked the idea that programmatic Google Docs suggestion
 10. **Dedicated Google Docs Coaching Summary Tab (`--summary-tab` / `--summary-tab-name <title>`)**:
    - Optionally creates or updates a dedicated **Google Docs Document Tab** (default title: **`🎓 DocuMentor AI Summary`**) inside the target Google Document via the Google Docs REST API v1 (`addDocumentTab` / tab-scoped `batchUpdate`), formatted in Pageless mode with `HEADING_1` / `HEADING_2` sections (Coach Impact & Decision Record, Core Writing Habits, Key Takeaways, Actionable Next Steps, and Coaching Items Digest).
    - On subsequent runs against the same Google Document (`-d <docId>`), `gdocumentor` searches `tabs[]` for the existing summary tab title, updates it in-place without duplicating tabs, and automatically excludes the summary tab from manuscript extraction so the main document body remains 100% untouched.
+11. **🔒 Optimistic Revision Control & Context-Aware UTF-16 Re-Anchoring (`WriteControl.requiredRevisionId`)**:
+   - **Zero-Overhead Optimistic Locking**: Binds all coordinate-dependent `batchUpdate` operations (`WriteMode.SUGGEST`, `--mode hint` `insertComment`, direct `edit` operations, and `--summary-tab`) to Google Docs API v1 `WriteControl.requiredRevisionId`—incurring **zero extra `documents.get` API calls** when no concurrent edit has occurred, while keeping coordinate-free `addCommentReply` requests unbound.
+   - **Two-Pass Surrogate-Pair-Safe Re-Anchoring on Concurrent Edits**: If a collaborator modifies the Google Document during LLM inference or between 2-step MCP Host-AI calls (`HTTP 400 FAILED_PRECONDITION` or `revisionId` advance), `gdocumentor` automatically fetches the latest settled document buffer (`SettledUTF16Buffer`, excluding pending `suggestedInsertionIds` and `suggestedDeletionIds`), verifies exact coordinates + cross-line 32-UTF-16-unit context anchors (`CtxBefore` / `CtxAfter`), re-anchors shifted items via length-weighted bigram Dice similarity, re-projects `--range` / `-t` selection scopes (`ScopeBoundaryAnchor`), and re-sorts all surviving edits in strictly descending `StartIndex` order.
+   - **Fail-Closed Stale Skipping & Immutable Visual Tracking**: Safely skips sentences already rewritten or deleted by a collaborator (`stale_superseded` / `stale_ambiguous` / `stale_out_of_scope`) without corrupting surrounding UTF-16 offsets or inflating `DecisionRecord.Cumulative.Issued`, tracks figures (`VISUAL_N`) by immutable `inlineObjectId` / `positionedObjectId` (`kix.xxx`) and tables (`TABLE_N`) by structural `TableSignature`, and persists ephemeral 30-minute Stage 1 snapshots (`prepared_snapshots`, `--base-revision-id`) for stateless 2-step MCP / `--prepare-only` continuity.
 
 ---
 
@@ -141,24 +145,24 @@ flowchart TD
 
     subgraph S2["Stage 2: Hybrid Gemini Context & Multimodal Inference"]
         A7 --> B1{"Payload Type &\nSize Check"}
-        B1 -->|"Text Target, Context & Rules (< 2MB)"| B2["Zero-Latency Inline XML Tags\n<organization_rules>\n<reference_context_files>\n<target_files>"]
+        B1 -->|"Text Target, Context & Rules (< 2MB)"| B2["Zero-Latency Inline XML Tags\n(organization_rules / reference_context_files / target_files)"]
         B1 -->|"Binary PDFs, VISUAL_N Figures,\nor Overflow Context (> 2MB)"| B3["Parallel Resumable Upload\nPOST /upload/v1beta/files\n+ Guaranteed defer DELETE"]
         B2 --> B4["Gemini API (gemini-3.8-flash / gemini-4-hydrogen / gemini-4-carbon / gemini-4-argon)\nresponseMimeType: application/json + responseSchema"]
         B3 --> B4
     end
 
-    subgraph S3["Stage 3: Deterministic UTF-16 Coordinate Matching"]
-        B4 --> C1["Fail-Closed Selection Scope Filter\n(Editable Target Blocks Only)"]
-        C1 --> C2["Surrogate-Pair Safe UTF-16 Matcher\n+ Duplicate Range Avoidance (usedRanges)"]
+    subgraph S3["Stage 3: Deterministic UTF-16 Coordinate Matching & Context Snapshot"]
+        B4 --> C1["Fail-Closed Selection Scope Filter\n(Editable Target Blocks + ScopeBoundaryAnchor)"]
+        C1 --> C2["Surrogate-Pair Safe UTF-16 Matcher\n+ Cross-Line 32-Unit CtxBefore/CtxAfter"]
         C2 --> C3["Bottom-to-Top Sort (StartIndex Descending)\nto Prevent Index Shift"]
     end
 
-    subgraph S4["Stage 4: Two-Phase Google Docs Batch Application & Output"]
-        C3 --> D1{"Coaching Mode"}
-        D1 -->|"Suggest Mode (--mode suggest)"| D2["Phase 1A: batchUpdate (writeMode: SUGGEST)\ndeleteContentRange + insertText"]
-        D2 --> D3["Phase 1B: Extract createdSuggestionIds\n& Attach addCommentReply (Reason + Learning Point)"]
-        D1 -->|"Hint-Only Mode (--mode hint)"| D4["Phase 1C: Anchored insertComment\n(Flagged Phrase + Socratic Hint)"]
-        D3 --> D5["Phase 2: Re-fetch Fresh UTF-16 Coordinates\n& Apply VISUAL_N / TABLE_N Comments (3-Tier Fallback)"]
+    subgraph S4["Stage 4: Optimistic Revision-Locked Batch Application & Output"]
+        C3 --> D1{"Coaching Mode\n(WriteControl.requiredRevisionId)"}
+        D1 -->|"Suggest Mode (--mode suggest)"| D2["Phase 1A: batchUpdate (writeMode: SUGGEST + requiredRevisionId)\nAuto Re-Anchor on Concurrent Edit (400 FAILED_PRECONDITION)"]
+        D2 --> D3["Phase 1B: Extract createdSuggestionIds\n& Attach Coordinate-Free addCommentReply"]
+        D1 -->|"Hint-Only Mode (--mode hint)"| D4["Phase 1C: Anchored insertComment (requiredRevisionId)\n+ Auto Re-Anchor on Concurrent Edit"]
+        D3 --> D5["Phase 2: Re-fetch Fresh UTF-16 Coordinates\n& Match VISUAL_N by ObjectID / TABLE_N by Signature"]
         D4 --> D5
         D5 --> D6["Output Stream Router"]
         D6 -->|"Interactive Terminal"| D7["Rich ANSI TUI Report\nWriting Coach Summary + Clickable Doc URL"]
@@ -206,14 +210,14 @@ sequenceDiagram
         CLI->>Gemini: DELETE /v1beta/files/{name} (100% Guaranteed Cleanup)
     end
 
-    CLI->>CLI: MatchSuggestionsToBlocks (UTF-16 Surrogate-Safe) & Sort StartIndex DESC
-    CLI->>GDocs: POST /v1/documents/{id}:batchUpdate (writeMode: SUGGEST, deleteContentRange + insertText)
-    GDocs-->>CLI: suggestionResponses (createdSuggestionIds)
-    CLI->>GDocs: POST /v1/documents/{id}:batchUpdate (addCommentReply with Reason & Learning Point)
+    CLI->>CLI: MatchSuggestionsToBlocksWithBuffer (UTF-16 + 32-Unit Context) & Sort StartIndex DESC
+    CLI->>GDocs: POST /v1/documents/{id}:batchUpdate (writeMode: SUGGEST, requiredRevisionId, deleteContentRange + insertText)
+    GDocs-->>CLI: suggestionResponses (createdSuggestionIds; auto re-anchor on 400 FAILED_PRECONDITION)
+    CLI->>GDocs: POST /v1/documents/{id}:batchUpdate (Coordinate-free addCommentReply with Reason & Learning Point)
 
     opt Has Figure (VISUAL_N) or Table (TABLE_N) Suggestions
-        CLI->>GDocs: GET /v1/documents/{id} (Re-fetch post-edit UTF-16 coordinates)
-        CLI->>GDocs: POST /v1/documents/{id}:batchUpdate (insertComment with 3-Tier Anchor Fallback)
+        CLI->>GDocs: GET /v1/documents/{id} (Re-fetch post-edit UTF-16 coordinates & revisionId)
+        CLI->>GDocs: POST /v1/documents/{id}:batchUpdate (insertComment matched by ObjectID / TableSignature + requiredRevisionId)
     end
 
     CLI-->>User: Render Writing Coach & Learning Summary + Google Docs URL (or Pure JSON on stdout)
@@ -657,6 +661,7 @@ AUTHENTICATION, MCP SERVER & AGENT SKILL FLAGS:
       --use-internal-gemini   Force internal Gemini API (GEMINI_API_KEY) even when running in MCP mode
       --prepare-only          Phase 1 Host-AI mode: resolve document/RAG/deps and return preparedContext without calling Gemini
       --skip-doc-insert       Phase 2 Host-AI mode: reconcile local line/file mapping against an already-populated Google Doc
+      --base-revision-id <id> Optional Google Docs revisionId from Phase 1 (--prepare-only) for concurrent edit re-anchoring
       --ai-result <json|@f>   Pre-computed ProofreadResult JSON from the Host AI agent (skips internal Gemini API call)
       --ai-summary-result <j> Pre-computed SummaryResult JSON from the Host AI agent (skips internal Gemini API call)
       --generated-draft <txt> Pre-computed draft text from the Host AI agent (skips internal Gemini API call)
@@ -1286,7 +1291,7 @@ rm -f ./agy_test_report.md
 ## Running Automated Tests, One-Command Test Cookbook & Feature Testing Guide
 
 ### 1. Automated Unit & Integration Test Suite
-Run the full Go unit and end-to-end integration test suite (covering OAuth2/Quota Project fallback, `--no-auth` local file/URL mode, UTF-16 surrogate-pair indexing, multi-file/range/URL resolution, automatic dependency discovery, Google Docs parser/builder, Gemini hybrid context & `defer` File API cleanup, and CLI `--json` stream separation):
+Run the full Go unit and end-to-end integration test suite (covering OAuth2/Quota Project fallback, `--no-auth` local file/URL mode, UTF-16 surrogate-pair indexing, optimistic revision locking & concurrent edit UTF-16 re-anchoring, multi-file/range/URL resolution, automatic dependency discovery, Google Docs parser/builder, Gemini hybrid context & `defer` File API cleanup, and CLI `--json` stream separation):
 
 ```bash
 go test -count=1 -v ./...
@@ -1315,6 +1320,9 @@ MIT License — Copyright (c) Kanshi Tanaike
 
 ## Update History
 
+- **v1.1.0** (November 14, 2026)
+  1. Added **Optimistic Revision Control & Context-Aware UTF-16 Re-Anchoring (`WriteControl.requiredRevisionId`)** across `proofread` (`--mode suggest` and `--mode hint`), `edit` (including `--suggest` non-downgrade protection), and `--summary-tab`: zero extra `documents.get` calls on uncontended runs, automatic conflict detection (`HTTP 400 FAILED_PRECONDITION`), Two-Pass surrogate-pair-safe cross-line 32-UTF-16-unit context re-anchoring (`SettledUTF16Buffer`), `--range` boundary re-projection (`ScopeBoundaryAnchor`), fail-closed `stale_superseded` / `stale_ambiguous` / `stale_out_of_scope` handling without Decision Record inflation, and immutable `ObjectID` / `TableSignature` element re-anchoring in Phase 2.
+  2. Added stateless 2-step MCP / `--prepare-only` revision snapshot continuity (`prepared_snapshots`, `--base-revision-id`) plus `revisionId`, `revisionControl`, and `skippedStaleSuggestions` telemetry in CLI TUI and `--json` outputs.
 - **v1.0.1** (November 14, 2026)
   1. Added first-class support and shorthand aliases for **Gemini 4 Hydrogen** (`--model gemini-4-hydrogen` / `--model hydrogen`) and **Gemini 4 Carbon** (`--model gemini-4-carbon` / `--model carbon`).
   2. Hardened Gemini 4 REST API compatibility: automatic filtering of internal `thought: true` reasoning parts and multi-part text reassembly in `generateContent` responses, automatic omission of deprecated `temperature` sampling parameters for `gemini-4-*` models, explicit `finishReason=MAX_TOKENS` / `blockReason` diagnostics, and extended `600s` default HTTP timeout (overridable via `DOCUMENTOR_HTTP_TIMEOUT`) plus `--gemini-base-url` (`GEMINI_BASE_URL`) support.

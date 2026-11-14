@@ -10,7 +10,7 @@ import (
 	"github.com/tanaikech/gdocumentor/internal/cli"
 )
 
-// Version can be injected at build time via -ldflags "-X 'main.Version=v1.0.1'".
+// Version can be injected at build time via -ldflags "-X 'main.Version=v1.1.0'".
 var Version = ""
 
 func main() {

@@ -1200,6 +1200,61 @@ func (c *Client) ExecuteMarkdownInsertAt(
 	imageHeightPt float64,
 	initialDeleteRequests []map[string]any,
 ) (int, error) {
+	return c.ExecuteMarkdownInsertAtWithRevision(
+		ctx, docID, tabID, targetIndex, markdownText,
+		leadingNewline, trailingNewline, writeMode, workDir,
+		imageWidthPt, imageHeightPt, initialDeleteRequests, "",
+	)
+}
+
+// ExecuteMarkdownInsertAtWithRevision inserts rich Markdown while guarding the initial atomic batch
+// with initialRevisionID (when non-empty) and chaining subsequent server-returned revision IDs.
+func (c *Client) ExecuteMarkdownInsertAtWithRevision(
+	ctx context.Context,
+	docID string,
+	tabID string,
+	targetIndex int,
+	markdownText string,
+	leadingNewline bool,
+	trailingNewline bool,
+	writeMode string,
+	workDir string,
+	imageWidthPt float64,
+	imageHeightPt float64,
+	initialDeleteRequests []map[string]any,
+	initialRevisionID string,
+) (int, error) {
+	return c.ExecuteMarkdownInsertAtWithRevisionTracked(
+		ctx, docID, tabID, targetIndex, markdownText,
+		leadingNewline, trailingNewline, writeMode, workDir,
+		imageWidthPt, imageHeightPt, initialDeleteRequests, initialRevisionID, nil,
+	)
+}
+
+// ExecuteMarkdownInsertAtWithRevisionTracked inserts rich Markdown while guarding the initial atomic batch
+// with initialRevisionID and immediately flipping *committedAnyWrite = true upon the first committed batchUpdate
+// (including table pre-deletions and insertTable before cell text is inserted).
+func (c *Client) ExecuteMarkdownInsertAtWithRevisionTracked(
+	ctx context.Context,
+	docID string,
+	tabID string,
+	targetIndex int,
+	markdownText string,
+	leadingNewline bool,
+	trailingNewline bool,
+	writeMode string,
+	workDir string,
+	imageWidthPt float64,
+	imageHeightPt float64,
+	initialDeleteRequests []map[string]any,
+	initialRevisionID string,
+	committedAnyWrite *bool,
+) (int, error) {
+	markCommitted := func() {
+		if committedAnyWrite != nil {
+			*committedAnyWrite = true
+		}
+	}
 	cleanMD := strings.ReplaceAll(markdownText, "\r\n", "\n")
 	// Strip at most one trailing '\n' before segmenting so trailingNewline controls paragraph termination cleanly
 	cleanMD = strings.TrimSuffix(cleanMD, "\n")
@@ -1281,6 +1336,7 @@ func (c *Client) ExecuteMarkdownInsertAt(
 	}
 
 	pendingPreRequests := initialDeleteRequests
+	currentRevID := strings.TrimSpace(initialRevisionID)
 
 	// Obtain initial maxBodyEnd if there are multiple segments (e.g. tables mixed with text)
 	var prevMaxBodyEnd int
@@ -1321,14 +1377,18 @@ func (c *Client) ExecuteMarkdownInsertAt(
 			pendingPreRequests = nil
 
 			if len(allReqs) > 0 {
-				if err := c.executeBatchWithWriteModeFallback(ctx, docID, allReqs, writeMode); err != nil {
+				nextRev, err := c.executeBatchWithWriteModeFallback(ctx, docID, allReqs, writeMode, currentRevID)
+				if err != nil {
 					return totalInsertedChars, err
 				}
+				markCommitted()
+				currentRevID = nextRev
 			}
 			totalInsertedChars += len([]rune(plainInserted)) + len(countSegmentImages(seg.Lines))
 
 			if !isLastSeg {
 				if freshDoc, fErr := c.FetchRawDocumentJSON(ctx, docID); fErr == nil {
+					currentRevID = strings.TrimSpace(getString(freshDoc, "revisionId"))
 					_, _, freshBuf := buildIndexedUTF16Buffer(freshDoc, tabID)
 					if prevMaxBodyEnd > 0 && freshBuf.maxBodyEnd >= prevMaxBodyEnd {
 						cursorIdx += freshBuf.maxBodyEnd - prevMaxBodyEnd
@@ -1353,11 +1413,15 @@ func (c *Client) ExecuteMarkdownInsertAt(
 
 		// If there are pending pre-requests (e.g. deleteContentRange for --replace-body / --replace-range), execute them first
 		if len(pendingPreRequests) > 0 {
-			if err := c.executeBatchWithWriteModeFallback(ctx, docID, pendingPreRequests, writeMode); err != nil {
+			nextRev, err := c.executeBatchWithWriteModeFallback(ctx, docID, pendingPreRequests, writeMode, currentRevID)
+			if err != nil {
 				return totalInsertedChars, err
 			}
+			markCommitted()
+			currentRevID = nextRev
 			pendingPreRequests = nil
 			if freshDoc, fErr := c.FetchRawDocumentJSON(ctx, docID); fErr == nil {
+				currentRevID = strings.TrimSpace(getString(freshDoc, "revisionId"))
 				_, _, freshBuf := buildIndexedUTF16Buffer(freshDoc, tabID)
 				prevMaxBodyEnd = freshBuf.maxBodyEnd
 				if cursorIdx > freshBuf.maxBodyEnd-1 {
@@ -1387,15 +1451,17 @@ func (c *Client) ExecuteMarkdownInsertAt(
 				},
 			},
 		}
-		if err := c.executeBatchWithWriteModeFallback(ctx, docID, insertTblReq, writeMode); err != nil {
+		if _, err := c.executeBatchWithWriteModeFallback(ctx, docID, insertTblReq, writeMode, currentRevID); err != nil {
 			return totalInsertedChars, err
 		}
+		markCommitted()
 
 		// Re-fetch document JSON to obtain the exact server-generated cell startIndex coordinates
 		afterTblDoc, fErr := c.FetchRawDocumentJSON(ctx, docID)
 		if fErr != nil {
 			return totalInsertedChars, fErr
 		}
+		currentRevID = strings.TrimSpace(getString(afterTblDoc, "revisionId"))
 		cellCoords, tableEndIdx := resolveInsertedTableCellCoordinates(afterTblDoc, tabID, tblInsertIdx, numRows, numCols)
 		_, _, afterTblBuf := buildIndexedUTF16Buffer(afterTblDoc, tabID)
 
@@ -1537,13 +1603,17 @@ func (c *Client) ExecuteMarkdownInsertAt(
 		}
 
 		if len(cellReqs) > 0 {
-			if err := c.executeBatchWithWriteModeFallback(ctx, docID, cellReqs, writeMode); err != nil {
+			nextRev, err := c.executeBatchWithWriteModeFallback(ctx, docID, cellReqs, writeMode, currentRevID)
+			if err != nil {
 				return totalInsertedChars, err
 			}
+			markCommitted()
+			currentRevID = nextRev
 		}
 
 		if !isLastSeg {
 			if freshDoc, fErr := c.FetchRawDocumentJSON(ctx, docID); fErr == nil {
+				currentRevID = strings.TrimSpace(getString(freshDoc, "revisionId"))
 				_, updatedEnd := resolveInsertedTableCellCoordinates(freshDoc, tabID, tblInsertIdx, numRows, numCols)
 				_, _, freshBuf := buildIndexedUTF16Buffer(freshDoc, tabID)
 				prevMaxBodyEnd = freshBuf.maxBodyEnd
@@ -1555,9 +1625,10 @@ func (c *Client) ExecuteMarkdownInsertAt(
 	}
 
 	if len(pendingPreRequests) > 0 {
-		if err := c.executeBatchWithWriteModeFallback(ctx, docID, pendingPreRequests, writeMode); err != nil {
+		if _, err := c.executeBatchWithWriteModeFallback(ctx, docID, pendingPreRequests, writeMode, currentRevID); err != nil {
 			return totalInsertedChars, err
 		}
+		markCommitted()
 	}
 
 	return totalInsertedChars, nil
@@ -1669,22 +1740,25 @@ func (c *Client) executeBatchWithWriteModeFallback(
 	docID string,
 	requests []map[string]any,
 	writeMode string,
-) error {
+	requiredRevisionID string,
+) (string, error) {
 	if len(requests) == 0 {
-		return nil
+		return requiredRevisionID, nil
 	}
 	payload := map[string]any{
-		"writeControl": map[string]any{
-			"writeMode": writeMode,
-		},
-		"requests": requests,
+		"writeControl": BuildWriteControl(writeMode, requiredRevisionID),
+		"requests":     requests,
 	}
-	_, err := c.ExecuteBatchUpdate(ctx, docID, payload)
-	if err != nil && writeMode == "SUGGEST" {
-		payload["writeControl"] = map[string]any{"writeMode": "EDIT"}
-		_, err = c.ExecuteBatchUpdate(ctx, docID, payload)
+	resp, err := c.ExecuteBatchUpdate(ctx, docID, payload)
+	// Never fall back from SUGGEST to destructive EDIT mode on a concurrent revision mismatch!
+	if err != nil && writeMode == "SUGGEST" && !IsRevisionMismatchError(err) {
+		payload["writeControl"] = BuildWriteControl("EDIT", requiredRevisionID)
+		resp, err = c.ExecuteBatchUpdate(ctx, docID, payload)
 	}
-	return err
+	if err != nil {
+		return "", err
+	}
+	return ExtractWriteControlRevisionID(resp), nil
 }
 
 // ResolveImageURIForDocsAPI resolves an image source (local file path, data:image/...;base64 URI,

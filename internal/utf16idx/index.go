@@ -44,6 +44,8 @@ type MatchedSuggestion struct {
 	HintOnly      bool   `json:"hintOnly"`
 	FilePath      string `json:"filePath,omitempty"`
 	LineNumber    int    `json:"lineNumber,omitempty"`
+	AnchorStatus  string `json:"anchorStatus,omitempty"` // "exact", "reanchored", "stale_superseded", "stale_ambiguous", "stale_out_of_scope"
+	ShiftDelta    int    `json:"shiftDelta,omitempty"`
 }
 
 // RangeInterval represents a half-open UTF-16 character interval [StartIndex, EndIndex).
@@ -153,8 +155,17 @@ func RangesOverlap(rangesA, rangesB []RangeInterval) bool {
 // prevents overlapping ranges, computes exact Google Docs UTF-16 coordinates, and sorts results
 // in descending StartIndex order (bottom-to-top) so batch updates never shift earlier offsets.
 func MatchSuggestionsToBlocks(blocks []EditableBlock, suggestions []RawSuggestion, tabID string, hintOnly bool, defaultCategory string) []MatchedSuggestion {
+	return MatchSuggestionsToBlocksWithBuffer(blocks, nil, suggestions, tabID, hintOnly, defaultCategory)
+}
+
+// MatchSuggestionsToBlocksWithBuffer resolves AI-proposed RawSuggestions against EditableBlocks while extracting
+// cross-line surrogate-pair-safe 32-UTF-16-unit context snapshots from settledBuf (synthesizing one from blocks if nil).
+func MatchSuggestionsToBlocksWithBuffer(blocks []EditableBlock, settledBuf *SettledUTF16Buffer, suggestions []RawSuggestion, tabID string, hintOnly bool, defaultCategory string) []MatchedSuggestion {
 	if defaultCategory == "" {
 		defaultCategory = "Revision"
+	}
+	if settledBuf == nil {
+		settledBuf = BuildSettledBufferFromBlocks(blocks)
 	}
 
 	var matched []MatchedSuggestion
@@ -181,6 +192,12 @@ func MatchSuggestionsToBlocks(blocks []EditableBlock, suggestions []RawSuggestio
 		}
 		if foundRange != nil {
 			usedRanges = append(usedRanges, *foundRange)
+			if settledBuf != nil {
+				if sbBefore, sbAfter, _, ok := settledBuf.SliceContextAroundDocSpan(foundRange.StartIndex, foundRange.EndIndex, ContextAnchorUTF16Units); ok {
+					ctxBefore = sbBefore
+					ctxAfter = sbAfter
+				}
+			}
 		}
 
 		if foundRange != nil {
@@ -201,6 +218,7 @@ func MatchSuggestionsToBlocks(blocks []EditableBlock, suggestions []RawSuggestio
 				CtxAfter:      ctxAfter,
 				TabID:         tabID,
 				HintOnly:      hintOnly,
+				AnchorStatus:  AnchorStatusExact,
 			}
 			if matchedBlock != nil {
 				item.FilePath = matchedBlock.FilePath

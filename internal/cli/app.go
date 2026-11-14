@@ -21,7 +21,7 @@ import (
 )
 
 // Version is the semantic version of the DocuMentor AI Go CLI & Agent Skill.
-var Version = "1.0.1"
+var Version = "1.1.0"
 
 // Options holds all parsed CLI flags, subcommand settings, and Agent Skill JSON input parameters.
 type Options struct {
@@ -99,6 +99,7 @@ type Options struct {
 	UseAgentAI        bool                    `json:"useAgentAi,omitempty"`        // --use-agent-ai: use host AI agent instead of internal Gemini API
 	UseInternalGemini bool                    `json:"useInternalGemini,omitempty"` // --use-internal-gemini: force internal Gemini API even in MCP mode
 	SkipDocInsert     bool                    `json:"skipDocInsert,omitempty"`     // --skip-doc-insert: skip re-inserting local file text when docId already has text from Phase 1
+	BaseRevisionID    string                  `json:"baseRevisionId,omitempty"`    // --base-revision-id: optional Stage 1 revisionId from prepareOnly for 2-step concurrent re-anchoring
 	AIResult          *gemini.ProofreadResult `json:"aiResult,omitempty"`          // --ai-result: pre-generated ProofreadResult JSON from host AI agent
 	AISummaryResult   *gemini.SummaryResult   `json:"aiSummaryResult,omitempty"`   // --ai-summary-result: pre-generated SummaryResult JSON from host AI agent
 	GeneratedDraft    string                  `json:"generatedDraft,omitempty"`    // --generated-draft: pre-generated initial draft text from host AI agent
@@ -769,6 +770,12 @@ func ParseArgs(args []string) (*Options, error) {
 			} else {
 				opts.SkipDocInsert = true
 			}
+		case "--base-revision-id", "--revision-id":
+			v, err := nextVal()
+			if err != nil {
+				return nil, err
+			}
+			opts.BaseRevisionID = strings.TrimSpace(v)
 		case "--ai-result":
 			v, err := nextVal()
 			if err != nil {
@@ -2413,16 +2420,39 @@ func executeProofreadCommand(
 			}
 		}
 
-		selRanges, selectionOnly, rErr := resolveExistingDocRange(rawDocJSON, opts.TabID, opts.RangeSpec)
-		if rErr != nil {
-			return nil, rErr
+		earlyScopeKey := buildProofreadScopeKey(opts)
+		bridgingConcurrentRange := false
+		if opts.AIResult != nil && strings.TrimSpace(opts.RangeSpec) != "" {
+			probeDoc := gdocs.ParseDocumentStructure(rawDocJSON, gdocs.ParseOptions{
+				PreferredTabID:        opts.TabID,
+				SelectionOnly:         false,
+				SkipDecisionReconcile: true,
+			})
+			if snap := gdocs.LoadPreparedRevisionSnapshot(docID, probeDoc.ActiveTabID, earlyScopeKey, opts.BaseRevisionID); snap != nil && snap.RevisionID != "" && snap.RevisionID != probeDoc.RevisionID {
+				// Collaborator modified the document between Step 1 and Step 2 while --range was active:
+				// parse full tab on rev_2 so ReanchorBuiltRequestData can project snap.ScopeAnchors onto rev_2
+				// without prematurely failing or truncating shifted paragraph indices.
+				bridgingConcurrentRange = true
+			}
 		}
 
-		docData = gdocs.ParseDocumentStructure(rawDocJSON, gdocs.ParseOptions{
-			PreferredTabID:  opts.TabID,
-			SelectionOnly:   selectionOnly,
-			SelectionRanges: selRanges,
-		})
+		if bridgingConcurrentRange {
+			docData = gdocs.ParseDocumentStructure(rawDocJSON, gdocs.ParseOptions{
+				PreferredTabID: opts.TabID,
+				SelectionOnly:  false,
+			})
+		} else {
+			selRanges, selectionOnly, rErr := resolveExistingDocRange(rawDocJSON, opts.TabID, opts.RangeSpec)
+			if rErr != nil {
+				return nil, rErr
+			}
+
+			docData = gdocs.ParseDocumentStructure(rawDocJSON, gdocs.ParseOptions{
+				PreferredTabID:  opts.TabID,
+				SelectionOnly:   selectionOnly,
+				SelectionRanges: selRanges,
+			})
+		}
 
 		// If the existing Google Doc is completely blank and --prompt is provided, auto-generate initial draft first
 		if docData.IsEmpty {
@@ -2438,9 +2468,16 @@ func executeProofreadCommand(
 		}
 	}
 
+	scopeKey := buildProofreadScopeKey(opts)
+
 	if !opts.NoAuth {
 		// Download embedded figure/chart images (VISUAL_1, etc.) in parallel for multimodal review
-		visualsWithImages = docsClient.FetchVisualImages(ctx, docData.VisualElements)
+		// (skip in Phase 2 when opts.AIResult is already supplied to shrink latency and concurrent-edit race window)
+		if opts.AIResult == nil {
+			visualsWithImages = docsClient.FetchVisualImages(ctx, docData.VisualElements)
+		} else {
+			visualsWithImages = docData.VisualElements
+		}
 
 		if isJa {
 			spin.Stop(fmt.Sprintf("Step 1/4: 準備完了 (DocID=%s, 対象=%d, 参照=%d, RAGルール=%d, ブロック=%d, 図=%d, 表=%d)",
@@ -2492,6 +2529,7 @@ func executeProofreadCommand(
 			}
 			visSummaries = append(visSummaries, PreparedVisualSummary{
 				TargetID:    v.TargetID,
+				ObjectID:    v.ObjectID,
 				Type:        v.Type,
 				Title:       v.Title,
 				Description: v.Description,
@@ -2500,7 +2538,13 @@ func executeProofreadCommand(
 				ImagePath:   imgPath,
 			})
 		}
-		nextInst := fmt.Sprintf("Step 1 complete (Google Doc ready: %s). Now perform Step 2 using your own LLM following coachingPrompt and expectedJsonSchema, then call gdocumentor_proofread AGAIN with docId: %q, skipDocInsert: true, and aiResult: { overallFeedback, learningSummary, existingSuggestionsNote, suggestions, elementSuggestions } (plus the same workDir, inputs/targets, mode, lang, summaryTab, outputPath, or saveLocal parameters) to apply the suggestions and comments to the Google Document.", gdocs.DocumentURL(docID), docID)
+		if !opts.NoAuth && docID != "" {
+			if docData.SelectionOnly && len(docData.SelectionRanges) > 0 && len(docData.ScopeAnchors) == 0 && docData.SettledBuffer != nil {
+				docData.ScopeAnchors = utf16idx.BuildScopeBoundaryAnchors(docData.SelectionRanges, docData.SettledBuffer)
+			}
+			gdocs.SavePreparedRevisionSnapshot(docID, docData, scopeKey)
+		}
+		nextInst := fmt.Sprintf("Step 1 complete (Google Doc ready: %s). Now perform Step 2 using your own LLM following coachingPrompt and expectedJsonSchema, then call gdocumentor_proofread AGAIN with docId: %q, skipDocInsert: true, baseRevisionId: %q, and aiResult: { overallFeedback, learningSummary, existingSuggestionsNote, suggestions, elementSuggestions } (plus the same workDir, inputs/targets, mode, lang, summaryTab, outputPath, or saveLocal parameters) to apply the suggestions and comments to the Google Document.", gdocs.DocumentURL(docID), docID, docData.RevisionID)
 		if opts.NoAuth {
 			nextInst = "Step 1 complete (Local Mode). Now perform Step 2 using your own LLM following coachingPrompt and expectedJsonSchema, then call gdocumentor_proofread AGAIN with noAuth: true, the same inputs/targets/workDir/mode/lang/outputPath, and aiResult: { overallFeedback, learningSummary, existingSuggestionsNote, suggestions, elementSuggestions } to write the local proofreading/coaching report."
 		}
@@ -2514,6 +2558,7 @@ func executeProofreadCommand(
 			LocalMode:             opts.NoAuth,
 			RequiresAgentAI:       true,
 			DocumentID:            docID,
+			RevisionID:            docData.RevisionID,
 			DocumentURL:           gdocs.DocumentURL(docID),
 			DocumentTitle:         docData.Title,
 			ActiveTabID:           docData.ActiveTabID,
@@ -2528,6 +2573,7 @@ func executeProofreadCommand(
 				Phase:                "phase1_prepared_for_agent_ai",
 				NextStepInstructions: nextInst,
 				DocumentID:           docID,
+				RevisionID:           docData.RevisionID,
 				DocumentURL:          gdocs.DocumentURL(docID),
 				ActiveTabID:          docData.ActiveTabID,
 				UsedDriveConversion:  usedDriveConversion,
@@ -2574,13 +2620,32 @@ func executeProofreadCommand(
 			spin.Start("Step 3/4: Matching UTF-16 coordinates and building bottom-to-top batchUpdate requests...")
 		}
 	}
-	built := gdocs.BuildRequestBody(
-		docData,
-		proofRes.Suggestions,
-		proofRes.ElementSuggestions,
-		opts.Lang,
-		hintOnly,
-	)
+
+	var built *gdocs.BuiltRequestData
+	if opts.AIResult != nil && !opts.NoAuth && docID != "" && strings.TrimSpace(docData.RevisionID) != "" {
+		if snap := gdocs.LoadPreparedRevisionSnapshot(docID, docData.ActiveTabID, scopeKey, opts.BaseRevisionID); snap != nil && snap.RevisionID != "" && snap.RevisionID != docData.RevisionID {
+			// Stateless 2-step concurrent edit bridge (rev_1 -> rev_2): match against Phase 1 snapshot first,
+			// then re-anchor onto rev_2 using 32-unit cross-line context, ScopeAnchors, and immutable ObjectIDs.
+			snapDoc := snap.ReconstructParsedDocument()
+			snapBuilt := gdocs.BuildRequestBody(
+				snapDoc,
+				proofRes.Suggestions,
+				proofRes.ElementSuggestions,
+				opts.Lang,
+				hintOnly,
+			)
+			built = gdocs.ReanchorBuiltRequestData(snapBuilt, docData, opts.Lang)
+		}
+	}
+	if built == nil {
+		built = gdocs.BuildRequestBody(
+			docData,
+			proofRes.Suggestions,
+			proofRes.ElementSuggestions,
+			opts.Lang,
+			hintOnly,
+		)
+	}
 	if isJa {
 		spin.Stop(fmt.Sprintf("Step 3/4: テキスト提案 %d件、図表コメント %d件を正確な UTF-16 範囲へマッピングしました",
 			built.MatchedTextCount, built.MatchedElementCount))
@@ -2649,6 +2714,23 @@ func executeProofreadCommand(
 		spin.Stop(fmt.Sprintf("Step 4/4: Applied %d suggestion(s)/comment(s) to Google Document", applyRes.AppliedSuggestionsCount))
 	}
 
+	finalMatchedText := built.MatchedItems
+	if applyRes.AppliedTextItems != nil || len(applyRes.SkippedStaleItems) > 0 {
+		finalMatchedText = applyRes.AppliedTextItems
+		built.MatchedItems = applyRes.AppliedTextItems
+		built.MatchedTextCount = len(applyRes.AppliedTextItems)
+	}
+	finalMatchedElements := built.MatchedElementItems
+	if applyRes.AppliedElementItems != nil {
+		finalMatchedElements = applyRes.AppliedElementItems
+		built.MatchedElementItems = applyRes.AppliedElementItems
+		built.MatchedElementCount = len(applyRes.AppliedElementItems)
+	}
+	finalRevID := docData.RevisionID
+	if applyRes.RevisionControl != nil && applyRes.RevisionControl.AppliedRevisionID != "" {
+		finalRevID = applyRes.RevisionControl.AppliedRevisionID
+	}
+
 	out := &CLIOutput{
 		Success:                     true,
 		Command:                     "proofread",
@@ -2658,6 +2740,7 @@ func executeProofreadCommand(
 		Language:                    opts.Lang,
 		OutputFilePath:              localOutPath,
 		DocumentID:                  docID,
+		RevisionID:                  finalRevID,
 		DocumentURL:                 gdocs.DocumentURL(docID),
 		DocumentTitle:               docData.Title,
 		ActiveTabID:                 docData.ActiveTabID,
@@ -2673,8 +2756,10 @@ func executeProofreadCommand(
 		AppliedSuggestionsCount:     applyRes.AppliedSuggestionsCount,
 		AppliedTextSuggestionsCount: applyRes.AppliedTextSuggestionsCount,
 		AppliedElementCommentsCount: applyRes.AppliedElementCommentsCount,
-		MatchedSuggestions:          built.MatchedItems,
-		MatchedElementSuggestions:   built.MatchedElementItems,
+		MatchedSuggestions:          finalMatchedText,
+		SkippedStaleSuggestions:     applyRes.SkippedStaleItems,
+		MatchedElementSuggestions:   finalMatchedElements,
+		RevisionControl:             applyRes.RevisionControl,
 		DecisionRecord:              applyRes.DecisionRecord,
 	}
 	if opts.SummaryTab {
@@ -2808,5 +2893,12 @@ func maxInt(a, b int) int {
 		return a
 	}
 	return b
+}
+
+func buildProofreadScopeKey(opts *Options) string {
+	if opts == nil {
+		return ""
+	}
+	return strings.TrimSpace(opts.RangeSpec) + "|" + strings.Join(opts.Targets, ",")
 }
 

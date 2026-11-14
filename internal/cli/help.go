@@ -167,6 +167,7 @@ AUTHENTICATION, LOCAL FILE OUTPUT, MCP SERVER & AGENT SKILL FLAGS:
       --use-agent-ai          Bypass internal Gemini API and use Client Agent AI two-phase or pre-generated execution
       --use-internal-gemini   Force internal Gemini API execution even when running in MCP mode
       --skip-doc-insert       Skip re-inserting local file text when --doc-id already contains text from Phase 1
+      --base-revision-id <id> Optional Google Docs revisionId from Phase 1 (--prepare-only) for concurrent edit re-anchoring
       --ai-result <json|@f>   Apply pre-generated ProofreadResult JSON from an external AI agent without calling Gemini API
       --ai-summary-result <j> Apply pre-generated SummaryResult JSON from an external AI agent without calling Gemini API
       --generated-draft <txt> Insert pre-generated initial draft text (or @file) without calling Gemini API
@@ -403,6 +404,7 @@ KEY FLAGS:
   -o, --output <file-path>      Write local Markdown report (works in BOTH --no-auth mode AND Google Docs mode)
       --save-local              Also save local Markdown report (<stem>_proofread.md / <stem>_hint.md) alongside Google Docs
   -w, --work-dir <dir>          Base working directory for resolving relative paths
+      --base-revision-id <id>   Optional Phase 1 Google Docs revisionId for 2-step optimistic re-anchoring
       --json                    Output pure JSON to stdout
 
 EXAMPLES:

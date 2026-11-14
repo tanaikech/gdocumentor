@@ -15,6 +15,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"time"
 	"unicode/utf8"
 
 	"github.com/tanaikech/gdocumentor/internal/auth"
@@ -144,157 +145,191 @@ func (c *Client) UpsertDocumentSummaryTab(
 	}
 	effectiveTitle := EffectiveSummaryTabTitle(tabTitle)
 
-	docJSON, err := c.FetchRawDocumentJSON(ctx, cleanID)
-	if err != nil {
-		return nil, fmt.Errorf("failed to fetch Google Document before summary tab upsert: %w", err)
-	}
+	var lastErr error
+	for attempt := 0; attempt <= MaxRevisionRetries; attempt++ {
+		if attempt > 0 {
+			if err := sleepRevisionBackoff(ctx, attempt); err != nil {
+				return nil, err
+			}
+		}
 
-	allTabs := flattenDocumentTabs(getSlice(docJSON, "tabs"))
-	existingTabID := ""
-	deleteEnd := 0
+		docJSON, err := c.FetchRawDocumentJSON(ctx, cleanID)
+		if err != nil {
+			return nil, fmt.Errorf("failed to fetch Google Document before summary tab upsert: %w", err)
+		}
+		currentRevID := strings.TrimSpace(getString(docJSON, "revisionId"))
 
-	for _, t := range allTabs {
-		props := getMap(t, "tabProperties")
-		tTitle := strings.TrimSpace(getString(props, "title"))
-		if strings.EqualFold(tTitle, effectiveTitle) {
-			existingTabID = strings.TrimSpace(getString(props, "tabId"))
-			dt := getMap(t, "documentTab")
-			bodyContent := getSlice(getMap(dt, "body"), "content")
-			if len(bodyContent) > 0 {
-				if lastEl, ok := bodyContent[len(bodyContent)-1].(map[string]any); ok {
-					endIdx := getInt(lastEl, "endIndex")
-					if endIdx > 2 {
-						deleteEnd = endIdx - 1
+		allTabs := flattenDocumentTabs(getSlice(docJSON, "tabs"))
+		existingTabID := ""
+		deleteEnd := 0
+
+		for _, t := range allTabs {
+			props := getMap(t, "tabProperties")
+			tTitle := strings.TrimSpace(getString(props, "title"))
+			if strings.EqualFold(tTitle, effectiveTitle) {
+				existingTabID = strings.TrimSpace(getString(props, "tabId"))
+				dt := getMap(t, "documentTab")
+				bodyContent := getSlice(getMap(dt, "body"), "content")
+				if len(bodyContent) > 0 {
+					if lastEl, ok := bodyContent[len(bodyContent)-1].(map[string]any); ok {
+						endIdx := getInt(lastEl, "endIndex")
+						if endIdx > 2 {
+							deleteEnd = endIdx - 1
+						}
 					}
 				}
-			}
-			break
-		}
-	}
-
-	targetTabID := existingTabID
-	createdNew := false
-
-	if targetTabID == "" {
-		createdNew = true
-		addResp, addErr := c.ExecuteBatchUpdate(ctx, cleanID, map[string]any{
-			"requests": []map[string]any{
-				{
-					"addDocumentTab": map[string]any{
-						"tabProperties": map[string]any{
-							"title": effectiveTitle,
-						},
-					},
-				},
-			},
-		})
-		if addErr != nil {
-			return nil, fmt.Errorf("failed to create summary tab %q in Google Document %s: %w", effectiveTitle, cleanID, addErr)
-		}
-		for _, rawReply := range getSlice(addResp, "replies") {
-			reply, ok := rawReply.(map[string]any)
-			if !ok {
-				continue
-			}
-			addTabReply := getMap(reply, "addDocumentTab")
-			if tid := strings.TrimSpace(getString(getMap(addTabReply, "tabProperties"), "tabId")); tid != "" {
-				targetTabID = tid
 				break
 			}
 		}
+
+		targetTabID := existingTabID
+		createdNew := false
+
 		if targetTabID == "" {
-			// Fallback for mock servers that do not populate replies[0].addDocumentTab
-			targetTabID = "t.summary"
-		}
-	}
-
-	var reqs []map[string]any
-	if !createdNew && deleteEnd > 1 {
-		reqs = append(reqs, map[string]any{
-			"deleteContentRange": map[string]any{
-				"range": map[string]any{
-					"tabId":      targetTabID,
-					"startIndex": 1,
-					"endIndex":   deleteEnd,
-				},
-			},
-		})
-	}
-
-	// Ensure the Summary Tab is formatted in Pageless mode ("ページ分け無し形式")
-	reqs = append(reqs, map[string]any{
-		"updateDocumentStyle": map[string]any{
-			"tabId": targetTabID,
-			"documentStyle": map[string]any{
-				"documentFormat": map[string]any{
-					"documentMode": "PAGELESS",
-				},
-			},
-			"fields": "documentFormat",
-		},
-	})
-
-	if strings.TrimSpace(content) != "" {
-		if !strings.HasSuffix(content, "\n") {
-			content += "\n"
-		}
-		contentUTF16Len := utf16idx.UTF16Len(content)
-		reqs = append(reqs,
-			map[string]any{
-				"insertText": map[string]any{
-					"location": map[string]any{
-						"tabId": targetTabID,
-						"index": 1,
+			createdNew = true
+			addPayload := map[string]any{
+				"requests": []map[string]any{
+					{
+						"addDocumentTab": map[string]any{
+							"tabProperties": map[string]any{
+								"title": effectiveTitle,
+							},
+						},
 					},
-					"text": content,
 				},
-			},
-			map[string]any{
-				"updateParagraphStyle": map[string]any{
+			}
+			if wc := BuildWriteControl("", currentRevID); len(wc) > 0 {
+				addPayload["writeControl"] = wc
+			}
+			addResp, addErr := c.ExecuteBatchUpdate(ctx, cleanID, addPayload)
+			if addErr != nil {
+				if IsRevisionMismatchError(addErr) && attempt < MaxRevisionRetries {
+					lastErr = addErr
+					continue
+				}
+				return nil, fmt.Errorf("failed to create summary tab %q in Google Document %s: %w", effectiveTitle, cleanID, addErr)
+			}
+			if nextRev := ExtractWriteControlRevisionID(addResp); nextRev != "" {
+				currentRevID = nextRev
+			} else {
+				currentRevID = ""
+			}
+			for _, rawReply := range getSlice(addResp, "replies") {
+				reply, ok := rawReply.(map[string]any)
+				if !ok {
+					continue
+				}
+				addTabReply := getMap(reply, "addDocumentTab")
+				if tid := strings.TrimSpace(getString(getMap(addTabReply, "tabProperties"), "tabId")); tid != "" {
+					targetTabID = tid
+					break
+				}
+			}
+			if targetTabID == "" {
+				// Fallback for mock servers that do not populate replies[0].addDocumentTab
+				targetTabID = "t.summary"
+			}
+		}
+
+		var reqs []map[string]any
+		if !createdNew && deleteEnd > 1 {
+			reqs = append(reqs, map[string]any{
+				"deleteContentRange": map[string]any{
 					"range": map[string]any{
 						"tabId":      targetTabID,
 						"startIndex": 1,
-						"endIndex":   1 + contentUTF16Len,
+						"endIndex":   deleteEnd,
 					},
-					"paragraphStyle": map[string]any{
-						"namedStyleType": "NORMAL_TEXT",
-					},
-					"fields": "namedStyleType",
 				},
-			},
-		)
+			})
+		}
 
-		for _, h := range headings {
-			if h.StartIndex >= 1 && h.EndIndex > h.StartIndex && h.EndIndex <= 1+contentUTF16Len && h.NamedStyle != "" {
-				reqs = append(reqs, map[string]any{
+		// Ensure the Summary Tab is formatted in Pageless mode ("ページ分け無し形式")
+		reqs = append(reqs, map[string]any{
+			"updateDocumentStyle": map[string]any{
+				"tabId": targetTabID,
+				"documentStyle": map[string]any{
+					"documentFormat": map[string]any{
+						"documentMode": "PAGELESS",
+					},
+				},
+				"fields": "documentFormat",
+			},
+		})
+
+		popContent := content
+		if strings.TrimSpace(popContent) != "" {
+			if !strings.HasSuffix(popContent, "\n") {
+				popContent += "\n"
+			}
+			contentUTF16Len := utf16idx.UTF16Len(popContent)
+			reqs = append(reqs,
+				map[string]any{
+					"insertText": map[string]any{
+						"location": map[string]any{
+							"tabId": targetTabID,
+							"index": 1,
+						},
+						"text": popContent,
+					},
+				},
+				map[string]any{
 					"updateParagraphStyle": map[string]any{
 						"range": map[string]any{
 							"tabId":      targetTabID,
-							"startIndex": h.StartIndex,
-							"endIndex":   h.EndIndex,
+							"startIndex": 1,
+							"endIndex":   1 + contentUTF16Len,
 						},
 						"paragraphStyle": map[string]any{
-							"namedStyleType": h.NamedStyle,
+							"namedStyleType": "NORMAL_TEXT",
 						},
 						"fields": "namedStyleType",
 					},
-				})
+				},
+			)
+
+			for _, h := range headings {
+				if h.StartIndex >= 1 && h.EndIndex > h.StartIndex && h.EndIndex <= 1+contentUTF16Len && h.NamedStyle != "" {
+					reqs = append(reqs, map[string]any{
+						"updateParagraphStyle": map[string]any{
+							"range": map[string]any{
+								"tabId":      targetTabID,
+								"startIndex": h.StartIndex,
+								"endIndex":   h.EndIndex,
+							},
+							"paragraphStyle": map[string]any{
+								"namedStyleType": h.NamedStyle,
+							},
+							"fields": "namedStyleType",
+						},
+					})
+				}
 			}
 		}
-	}
 
-	if len(reqs) > 0 {
-		if _, uErr := c.ExecuteBatchUpdate(ctx, cleanID, map[string]any{"requests": reqs}); uErr != nil {
-			return nil, fmt.Errorf("failed to populate summary tab %q (%s): %w", effectiveTitle, targetTabID, uErr)
+		if len(reqs) > 0 {
+			popPayload := map[string]any{"requests": reqs}
+			if wc := BuildWriteControl("", currentRevID); len(wc) > 0 {
+				popPayload["writeControl"] = wc
+			}
+			if _, uErr := c.ExecuteBatchUpdate(ctx, cleanID, popPayload); uErr != nil {
+				if IsRevisionMismatchError(uErr) && attempt < MaxRevisionRetries {
+					lastErr = uErr
+					continue
+				}
+				return nil, fmt.Errorf("failed to populate summary tab %q (%s): %w", effectiveTitle, targetTabID, uErr)
+			}
 		}
+
+		return &UpsertSummaryTabResult{
+			TabID:         targetTabID,
+			TabTitle:      effectiveTitle,
+			TabURL:        DocumentTabURL(cleanID, targetTabID),
+			CreatedNewTab: createdNew,
+		}, nil
 	}
 
-	return &UpsertSummaryTabResult{
-		TabID:         targetTabID,
-		TabTitle:      effectiveTitle,
-		TabURL:        DocumentTabURL(cleanID, targetTabID),
-		CreatedNewTab: createdNew,
-	}, nil
+	return nil, fmt.Errorf("failed to upsert summary tab %q after %d revision retries: %w", effectiveTitle, MaxRevisionRetries, lastErr)
 }
 
 // SetDocumentPageless configures a Google Document to display in Pageless mode ("ページ分け無し形式", documentMode = "PAGELESS").
@@ -707,6 +742,134 @@ func (c *Client) FetchRawDocumentJSON(ctx context.Context, docID string) (map[st
 	return docJSON, nil
 }
 
+const (
+	// MaxRevisionRetries bounds optimistic WriteControl.requiredRevisionId retry passes under concurrent edits.
+	MaxRevisionRetries = 3
+)
+
+// RevisionBackoffBase is the base delay before retrying after a revision conflict (short enough for responsive CLI/tests).
+var RevisionBackoffBase = 25 * time.Millisecond
+
+func sleepRevisionBackoff(ctx context.Context, attempt int) error {
+	if attempt <= 0 || RevisionBackoffBase <= 0 {
+		return nil
+	}
+	delay := RevisionBackoffBase * time.Duration(1<<(attempt-1))
+	timer := time.NewTimer(delay)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		return nil
+	}
+}
+
+// DocsAPIError represents a structured HTTP error returned by the Google Docs REST API v1.
+type DocsAPIError struct {
+	HTTPStatus int    `json:"httpStatus"`
+	RPCStatus  string `json:"rpcStatus"`
+	Message    string `json:"message"`
+	RawBody    string `json:"-"`
+}
+
+func (e *DocsAPIError) Error() string {
+	bodyText := e.RawBody
+	if strings.TrimSpace(bodyText) == "" {
+		bodyText = e.Message
+	}
+	return fmt.Sprintf("Google Docs batchUpdate error (%d): %s", e.HTTPStatus, bodyText)
+}
+
+func parseDocsAPIError(status int, respBody []byte) *DocsAPIError {
+	raw := string(respBody)
+	apiErr := &DocsAPIError{
+		HTTPStatus: status,
+		RawBody:    raw,
+	}
+	var env struct {
+		Error struct {
+			Code    int    `json:"code"`
+			Status  string `json:"status"`
+			Message string `json:"message"`
+		} `json:"error"`
+	}
+	if json.Unmarshal(respBody, &env) == nil {
+		apiErr.RPCStatus = strings.TrimSpace(env.Error.Status)
+		apiErr.Message = strings.TrimSpace(env.Error.Message)
+	}
+	return apiErr
+}
+
+// IsRevisionMismatchError returns true strictly when err is a Google Docs API error caused by
+// WriteControl.requiredRevisionId / revision conflict (HTTP 400 FAILED_PRECONDITION / INVALID_ARGUMENT
+// referencing revision mismatch, or HTTP 409/412), distinguishing concurrent-edit conflicts from
+// malformed request / out-of-bounds index errors.
+func IsRevisionMismatchError(err error) bool {
+	if err == nil {
+		return false
+	}
+	var apiErr *DocsAPIError
+	if !errors.As(err, &apiErr) {
+		return false
+	}
+	if apiErr.HTTPStatus != http.StatusBadRequest &&
+		apiErr.HTTPStatus != http.StatusConflict &&
+		apiErr.HTTPStatus != http.StatusPreconditionFailed {
+		return false
+	}
+	combined := strings.ToLower(apiErr.Message + " " + apiErr.RawBody)
+	rpc := strings.ToUpper(apiErr.RPCStatus)
+
+	if strings.Contains(combined, "requiredrevisionid") ||
+		strings.Contains(combined, "targetrevisionid") ||
+		strings.Contains(combined, "required revision") ||
+		strings.Contains(combined, "document's revision") ||
+		strings.Contains(combined, "writecontrol") {
+		return true
+	}
+	if (rpc == "FAILED_PRECONDITION" || rpc == "ABORTED" ||
+		apiErr.HTTPStatus == http.StatusConflict || apiErr.HTTPStatus == http.StatusPreconditionFailed) &&
+		(strings.Contains(combined, "revision") || strings.Contains(combined, "modified")) {
+		return true
+	}
+	if strings.Contains(combined, "revision") &&
+		(strings.Contains(combined, "does not match") ||
+			strings.Contains(combined, "mismatch") ||
+			strings.Contains(combined, "out of date") ||
+			strings.Contains(combined, "stale") ||
+			strings.Contains(combined, "modified")) {
+		return true
+	}
+	return false
+}
+
+// BuildWriteControl constructs a Google Docs API v1 WriteControl object, omitting requiredRevisionId
+// whenever revisionID is empty (preserving compatibility with --no-auth and mock servers without revisionId).
+func BuildWriteControl(writeMode, requiredRevisionID string) map[string]any {
+	wm := strings.TrimSpace(writeMode)
+	rev := strings.TrimSpace(requiredRevisionID)
+	if wm == "" && rev == "" {
+		return nil
+	}
+	wc := make(map[string]any, 2)
+	if wm != "" {
+		wc["writeMode"] = wm
+	}
+	if rev != "" {
+		wc["requiredRevisionId"] = rev
+	}
+	return wc
+}
+
+// ExtractWriteControlRevisionID reads the updated document revision ID returned in BatchUpdateDocumentResponse.writeControl.
+func ExtractWriteControlRevisionID(resp map[string]any) string {
+	if len(resp) == 0 {
+		return ""
+	}
+	return strings.TrimSpace(getString(getMap(resp, "writeControl"), "requiredRevisionId"))
+}
+
 // ExecuteBatchUpdate executes a POST /v1/documents/{docId}:batchUpdate call and returns the parsed JSON response.
 func (c *Client) ExecuteBatchUpdate(ctx context.Context, docID string, payload map[string]any) (map[string]any, error) {
 	cleanID := ExtractDocumentID(docID)
@@ -721,7 +884,7 @@ func (c *Client) ExecuteBatchUpdate(ctx context.Context, docID string, payload m
 		return nil, err
 	}
 	if status != http.StatusOK {
-		return nil, fmt.Errorf("Google Docs batchUpdate error (%d): %s", status, string(respBody))
+		return nil, parseDocsAPIError(status, respBody)
 	}
 
 	var res map[string]any
@@ -763,8 +926,13 @@ func (c *Client) ExecuteSuggestionActionRequestsSafely(ctx context.Context, docI
 
 // TryInsertCommentRequest executes a single insertComment request and returns true if HTTP 200.
 func (c *Client) TryInsertCommentRequest(ctx context.Context, docID, content string, anchorRange map[string]any) bool {
-	cleanID := ExtractDocumentID(docID)
-	endpoint := fmt.Sprintf("%s/documents/%s:batchUpdate", c.docsBaseURL, url.PathEscape(cleanID))
+	_, ok, _ := c.TryInsertCommentRequestWithRevision(ctx, docID, content, anchorRange, "")
+	return ok
+}
+
+// TryInsertCommentRequestWithRevision executes a single insertComment request optionally guarded by requiredRevisionID,
+// returning the updated revisionId (if provided by the API), success status, and whether failure was a revision mismatch.
+func (c *Client) TryInsertCommentRequestWithRevision(ctx context.Context, docID, content string, anchorRange map[string]any, requiredRevisionID string) (string, bool, bool) {
 	payload := map[string]any{
 		"requests": []map[string]any{
 			{
@@ -775,9 +943,14 @@ func (c *Client) TryInsertCommentRequest(ctx context.Context, docID, content str
 			},
 		},
 	}
-	b, _ := json.Marshal(payload)
-	status, _, _, err := c.authMgr.DoGoogleRequest(ctx, http.MethodPost, endpoint, b, "application/json")
-	return err == nil && status == http.StatusOK
+	if wc := BuildWriteControl("", requiredRevisionID); len(wc) > 0 {
+		payload["writeControl"] = wc
+	}
+	resp, err := c.ExecuteBatchUpdate(ctx, docID, payload)
+	if err != nil {
+		return "", false, IsRevisionMismatchError(err)
+	}
+	return ExtractWriteControlRevisionID(resp), true, false
 }
 
 // FetchRagRuleFilesFromDrive resolves a Google Drive Folder or Single File ID/URL into RAG rule files in parallel.

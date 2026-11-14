@@ -255,6 +255,9 @@ func (buf *indexedUTF16Buffer) findSubstringIntervals(
 		}
 		needleUnits = utf16.Encode([]rune(strings.ToLower(needle)))
 		nLen = len(needleUnits)
+		if nLen == 0 || nLen > len(hayUnits) {
+			return nil
+		}
 	}
 
 	var matches []utf16idx.RangeInterval
@@ -758,11 +761,48 @@ func (c *Client) EditDocument(ctx context.Context, req EditDocumentRequest, isJa
 		}
 	}
 
-	// 3. Fetch current document structure and build exact UTF-16 coordinate map
+	// 3. Optimistic Revision-Controlled Edit Execution (retries up to MaxRevisionRetries on concurrent edit conflicts)
+	maxAttempts := 0
+	if !createdNew {
+		maxAttempts = MaxRevisionRetries
+	}
+	var lastRevErr error
+	for attempt := 0; attempt <= maxAttempts; attempt++ {
+		if attempt > 0 {
+			if err := sleepRevisionBackoff(ctx, attempt); err != nil {
+				return nil, err
+			}
+		}
+		committedAnyWrite := false
+		res, editErr := c.editDocumentOnce(ctx, docID, docTitle, createdNew, writeMode, req, isJa, &committedAnyWrite)
+		if editErr == nil {
+			return res, nil
+		}
+		if !committedAnyWrite && IsRevisionMismatchError(editErr) && attempt < maxAttempts {
+			lastRevErr = editErr
+			continue
+		}
+		return nil, editErr
+	}
+	return nil, lastRevErr
+}
+
+func (c *Client) editDocumentOnce(
+	ctx context.Context,
+	docID string,
+	docTitle string,
+	createdNew bool,
+	writeMode string,
+	req EditDocumentRequest,
+	isJa bool,
+	committedAnyWrite *bool,
+) (*EditDocumentResult, error) {
+	// Fetch current document structure and build exact UTF-16 coordinate map
 	docJSON, err := c.FetchRawDocumentJSON(ctx, docID)
 	if err != nil {
 		return nil, err
 	}
+	docRevID := strings.TrimSpace(getString(docJSON, "revisionId"))
 	if docTitle == "" {
 		docTitle = getString(docJSON, "title")
 	}
@@ -1053,12 +1093,18 @@ func (c *Client) EditDocument(ctx context.Context, req EditDocumentRequest, isJa
 			replacement := strings.ReplaceAll(firstNonEmptyRaw(req.ReplaceText, req.InsertText), "\r\n", "\n")
 			if req.Markdown && replacement != "" {
 				operations = append(operations, string(EditOpInsertMarkdown))
-				insCount, mErr := c.ExecuteMarkdownInsertAt(
+				insCount, mErr := c.ExecuteMarkdownInsertAtWithRevisionTracked(
 					ctx, docID, activeTabID, 1, replacement,
-					false, false, writeMode, req.WorkDir, req.ImageWidth, req.ImageHeight, delReqs,
+					false, false, writeMode, req.WorkDir, req.ImageWidth, req.ImageHeight, delReqs, docRevID, committedAnyWrite,
 				)
+				if insCount > 0 && committedAnyWrite != nil {
+					*committedAnyWrite = true
+				}
 				if mErr != nil {
 					return nil, mErr
+				}
+				if committedAnyWrite != nil {
+					*committedAnyWrite = true
 				}
 				insertedChars += insCount
 				alreadyExecutedBatch = true
@@ -1153,6 +1199,7 @@ func (c *Client) EditDocument(ctx context.Context, req EditDocumentRequest, isJa
 
 		if req.Markdown && replacement != "" {
 			operations = append(operations, string(EditOpReplaceRange), string(EditOpInsertMarkdown))
+			revForItem := docRevID
 			for _, iv := range intervals {
 				eIdx := minInt(iv.EndIndex, maxDelEnd)
 				var delReqs []map[string]any
@@ -1164,13 +1211,20 @@ func (c *Client) EditDocument(ctx context.Context, req EditDocumentRequest, isJa
 					})
 					deletedChars += eIdx - iv.StartIndex
 				}
-				insCount, mErr := c.ExecuteMarkdownInsertAt(
+				insCount, mErr := c.ExecuteMarkdownInsertAtWithRevisionTracked(
 					ctx, docID, activeTabID, iv.StartIndex, replacement,
-					false, false, writeMode, req.WorkDir, req.ImageWidth, req.ImageHeight, delReqs,
+					false, false, writeMode, req.WorkDir, req.ImageWidth, req.ImageHeight, delReqs, revForItem, committedAnyWrite,
 				)
+				if insCount > 0 && committedAnyWrite != nil {
+					*committedAnyWrite = true
+				}
 				if mErr != nil {
 					return nil, mErr
 				}
+				if committedAnyWrite != nil {
+					*committedAnyWrite = true
+				}
+				revForItem = ""
 				insertedChars += insCount
 				affectedRanges = append(affectedRanges, EditRangeSummary{
 					StartIndex: iv.StartIndex,
@@ -1234,6 +1288,7 @@ func (c *Client) EditDocument(ctx context.Context, req EditDocumentRequest, isJa
 			operations = append(operations, string(EditOpReplaceText), string(EditOpInsertMarkdown))
 			maxDelEnd := buf.maxBodyEnd - 1
 			sortIntervalsDescending(matches)
+			revForItem := docRevID
 			for _, iv := range matches {
 				eIdx := minInt(iv.EndIndex, maxDelEnd)
 				var delReqs []map[string]any
@@ -1245,13 +1300,20 @@ func (c *Client) EditDocument(ctx context.Context, req EditDocumentRequest, isJa
 					})
 					deletedChars += len([]rune(req.FindText))
 				}
-				insCount, mErr := c.ExecuteMarkdownInsertAt(
+				insCount, mErr := c.ExecuteMarkdownInsertAtWithRevisionTracked(
 					ctx, docID, activeTabID, iv.StartIndex, replacement,
-					false, false, writeMode, req.WorkDir, req.ImageWidth, req.ImageHeight, delReqs,
+					false, false, writeMode, req.WorkDir, req.ImageWidth, req.ImageHeight, delReqs, revForItem, committedAnyWrite,
 				)
+				if insCount > 0 && committedAnyWrite != nil {
+					*committedAnyWrite = true
+				}
 				if mErr != nil {
 					return nil, mErr
 				}
+				if committedAnyWrite != nil {
+					*committedAnyWrite = true
+				}
+				revForItem = ""
 				insertedChars += insCount
 				affectedRanges = append(affectedRanges, EditRangeSummary{
 					StartIndex: iv.StartIndex,
@@ -1331,12 +1393,18 @@ func (c *Client) EditDocument(ctx context.Context, req EditDocumentRequest, isJa
 			if strings.TrimSpace(req.InsertText) == "" {
 				return nil, errors.New("insert text is empty")
 			}
-			insCount, mErr := c.ExecuteMarkdownInsertAt(
+			insCount, mErr := c.ExecuteMarkdownInsertAtWithRevisionTracked(
 				ctx, docID, activeTabID, targetIdx, req.InsertText,
-				leadingNL, trailingNL, writeMode, req.WorkDir, req.ImageWidth, req.ImageHeight, nil,
+				leadingNL, trailingNL, writeMode, req.WorkDir, req.ImageWidth, req.ImageHeight, nil, docRevID, committedAnyWrite,
 			)
+			if insCount > 0 && committedAnyWrite != nil {
+				*committedAnyWrite = true
+			}
 			if mErr != nil {
 				return nil, mErr
+			}
+			if committedAnyWrite != nil {
+				*committedAnyWrite = true
 			}
 			insertedChars = insCount
 			affectedRanges = append(affectedRanges, EditRangeSummary{
@@ -1388,19 +1456,21 @@ func (c *Client) EditDocument(ctx context.Context, req EditDocumentRequest, isJa
 
 	if !alreadyExecutedBatch && len(batchRequests) > 0 {
 		payload := map[string]any{
-			"writeControl": map[string]any{
-				"writeMode": writeMode,
-			},
-			"requests": batchRequests,
+			"writeControl": BuildWriteControl(writeMode, docRevID),
+			"requests":     batchRequests,
 		}
 		resp, bErr := c.ExecuteBatchUpdate(ctx, docID, payload)
-		if bErr != nil && writeMode == "SUGGEST" {
-			// Fallback to EDIT mode if structural/image operations were rejected in SUGGEST mode
-			payload["writeControl"] = map[string]any{"writeMode": "EDIT"}
+		// Fallback to EDIT mode ONLY when structural/image operations were rejected in SUGGEST mode,
+		// NEVER when WriteControl.requiredRevisionId detected a concurrent edit conflict!
+		if bErr != nil && writeMode == "SUGGEST" && !IsRevisionMismatchError(bErr) {
+			payload["writeControl"] = BuildWriteControl("EDIT", docRevID)
 			resp, bErr = c.ExecuteBatchUpdate(ctx, docID, payload)
 		}
 		if bErr != nil {
 			return nil, bErr
+		}
+		if committedAnyWrite != nil {
+			*committedAnyWrite = true
 		}
 		// Extract occurrencesChanged from replaceAllText reply if present
 		for _, rawReply := range getSlice(resp, "replies") {

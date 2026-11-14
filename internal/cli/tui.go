@@ -560,6 +560,18 @@ func RenderCoachingReport(w io.Writer, out *CLIOutput) {
 		fmt.Fprintf(w, "\n%s%s%s\n%s\n", ansiBold+ansiBlue, lbl, ansiReset, indentLines(out.ExistingSuggestionsNote, "   "))
 	}
 
+	if out.RevisionControl != nil && (out.RevisionControl.ReanchoredCount > 0 || out.RevisionControl.StaleSkippedCount > 0 || out.RevisionControl.RevisionRetries > 0) {
+		if isJa {
+			fmt.Fprintf(w, "\n%s🔒 楽観的リビジョン制御 & UTF-16 再アンカリング:%s リトライ=%d回, 再配置=%d件, 並行変更によりスキップ=%d件\n",
+				ansiBold+ansiCyan, ansiReset,
+				out.RevisionControl.RevisionRetries, out.RevisionControl.ReanchoredCount, out.RevisionControl.StaleSkippedCount)
+		} else {
+			fmt.Fprintf(w, "\n%s🔒 Optimistic Revision Control & UTF-16 Re-Anchoring:%s retries=%d, re-anchored=%d, stale-skipped=%d\n",
+				ansiBold+ansiCyan, ansiReset,
+				out.RevisionControl.RevisionRetries, out.RevisionControl.ReanchoredCount, out.RevisionControl.StaleSkippedCount)
+		}
+	}
+
 	if len(out.MatchedSuggestions) > 0 {
 		lbl := fmt.Sprintf("✏️  Applied Inline Suggestions / Coaching Hints (%d matched):", len(out.MatchedSuggestions))
 		if isJa {
@@ -852,6 +864,7 @@ func indentLines(s, prefix string) string {
 // so an external AI agent can inspect the image using its own multimodal read_file tool.
 type PreparedVisualSummary struct {
 	TargetID    string `json:"targetId"`
+	ObjectID    string `json:"objectId,omitempty"`
 	Type        string `json:"type"`
 	Title       string `json:"title,omitempty"`
 	Description string `json:"description,omitempty"`
@@ -867,6 +880,7 @@ type AgentPreparedContext struct {
 	Phase                string                     `json:"phase"`
 	NextStepInstructions string                     `json:"nextStepInstructions"`
 	DocumentID           string                     `json:"documentId,omitempty"`
+	RevisionID           string                     `json:"revisionId,omitempty"`
 	DocumentURL          string                     `json:"documentUrl,omitempty"`
 	ActiveTabID          string                     `json:"activeTabId,omitempty"`
 	UsedDriveConversion  bool                       `json:"usedDriveConversion,omitempty"`
@@ -894,6 +908,7 @@ type CLIOutput struct {
 	PreparedContext             *AgentPreparedContext            `json:"preparedContext,omitempty"`
 	OutputFilePath              string                           `json:"outputFilePath,omitempty"`
 	DocumentID                  string                           `json:"documentId"`
+	RevisionID                  string                           `json:"revisionId,omitempty"`
 	DocumentURL                 string                           `json:"documentUrl"`
 	DocumentTitle               string                           `json:"documentTitle,omitempty"`
 	ActiveTabID                 string                           `json:"activeTabId,omitempty"`
@@ -914,7 +929,9 @@ type CLIOutput struct {
 	AppliedTextSuggestionsCount int                              `json:"appliedTextSuggestionsCount"`
 	AppliedElementCommentsCount int                              `json:"appliedElementCommentsCount"`
 	MatchedSuggestions          []utf16idx.MatchedSuggestion     `json:"matchedSuggestions,omitempty"`
+	SkippedStaleSuggestions     []utf16idx.MatchedSuggestion     `json:"skippedStaleSuggestions,omitempty"`
 	MatchedElementSuggestions   []gdocs.MatchedElementSuggestion `json:"matchedElementSuggestions,omitempty"`
+	RevisionControl             *gdocs.RevisionControlSummary    `json:"revisionControl,omitempty"`
 	AnalyzedItems               []gemini.AnalyzedReviewItem      `json:"analyzedItems,omitempty"`
 	GeneratedDraft              string                           `json:"generatedDraft,omitempty"`
 	ManageAction                string                           `json:"manageAction,omitempty"`

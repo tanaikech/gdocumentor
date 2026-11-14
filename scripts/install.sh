@@ -55,7 +55,7 @@ else
 fi
 
 chmod +x "${TARGET_BIN}"
-echo "✅ Installed binary: ${TARGET_BIN} ($("${TARGET_BIN}" --version 2>/dev/null || echo "v1.0.1"))"
+echo "✅ Installed binary: ${TARGET_BIN} ($("${TARGET_BIN}" --version 2>/dev/null || echo "v1.1.0"))"
 
 # Run multi-agent setup (passes any extra arguments such as --all, --agent, --scope, --wsl-host, --win-user)
 if [[ $# -eq 0 ]]; then

@@ -6,7 +6,7 @@
 
 ## Overview: Two Flexible Setup Tracks for Individual Users
 
-This guide walks **individual users** (independent writers, bloggers, students, academic researchers, and software engineers) through installing, configuring, and using **`gdocumentor` (`v1.0.1`, DocuMentor AI Go CLI, MCP Server & Antigravity Plugin)**.
+This guide walks **individual users** (independent writers, bloggers, students, academic researchers, and software engineers) through installing, configuring, and using **`gdocumentor` (`v1.1.0`, DocuMentor AI Go CLI, MCP Server & Antigravity Plugin)**.
 
 Depending on whether you want **instant local proofreading without Google Cloud setup** or **full Google Docs & Drive integration**, you can choose between two personal setup tracks:
 
